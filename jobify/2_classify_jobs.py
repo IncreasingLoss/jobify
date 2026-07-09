@@ -30,7 +30,7 @@ LIMIT = None # None
 CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
 TAGS_URL = f"{OLLAMA_BASE_URL}/api/tags"
 
-VALID_CLASSIFICATIONS = {"working_student", "not_working_student", "unsure"}
+VALID_CLASSIFICATIONS = {"yes", "no"}
 
 
 
@@ -45,18 +45,18 @@ still in school working toward one
 - Field of study reasonably relevant to the role
 - Often hourly pay, flexible around lectures/exams
 
-Classify as "not_working_student" if, even when the title says "Werkstudent":
+Classify as "no" if, even when the title says "Werkstudent":
 - Full-time (Vollzeit, 35-40+h/week)
 - An internship (Praktikum/Praktikant) or fixed-term full-time placement — this is \
 a different category from Werkstudent, even if both words appear
 - A regular full-time entry-level/junior/graduate/professional role
 - No part-time or student framing at all
 
-If there isn't enough detail to be sure, classify as "unsure" rather than guessing.
+If you are not sure, answer "no".
 
-Respond with ONLY this JSON, nothing else:
-{"classification": "working_student" or "not_working_student" or "unsure", \
-"reason": "one short sentence, citing the key phrase if possible"}
+Respond with ONLY this JSON and nothing else — no explanation, no reasoning, no \
+extra text:
+{"classification": "yes" or "no"}
 """
 
 CLASSIFY_USER_TEMPLATE = """Title: {title}
@@ -70,12 +70,11 @@ SKILLS_SYSTEM_PROMPT = CLASSIFY_SYSTEM_PROMPT + """
 You will also receive the candidate's skills and background. Rate the fit between \
 the candidate's skills and the job's requirements as "skills_matching": an integer \
 0-100 (0 = no overlap, 100 = excellent match). Use the full range, not just round \
-numbers. Do not explain the score.
+numbers.
 
-Respond with ONLY this JSON, nothing else:
-{"classification": "working_student" or "not_working_student" or "unsure", \
-"reason": "one short sentence on the working-student verdict", \
-"skills_matching": integer 0-100}
+Respond with ONLY this JSON and nothing else — no explanation, no reasoning, no \
+extra text:
+{"classification": "yes" or "no", "skills_matching": integer 0-100}
 """
 
 SKILLS_USER_TEMPLATE = """Candidate skills and background:
@@ -155,14 +154,19 @@ def _normalize_classification(value):
     if v in VALID_CLASSIFICATIONS:
         return v
     aliases = {
-        "working student":         "working_student",
-        "yes": "working_student",  "true": "working_student",
-        "not working student":     "not_working_student",
-        "not_a_working_student":   "not_working_student",
-        "no": "not_working_student", "false": "not_working_student",
-        "uncertain": "unsure",     "unclear": "unsure", "unknown": "unsure",
+        "working_student":        "yes",
+        "working student":        "yes",
+        "true":                   "yes",
+        "not_working_student":    "no",
+        "not working student":    "no",
+        "not_a_working_student":  "no",
+        "false":                  "no",
+        "unsure":                 "no",
+        "uncertain":              "no",
+        "unclear":                "no",
+        "unknown":                "no",
     }
-    return aliases.get(v, "unsure")
+    return aliases.get(v, "no")
 
 
 def classify_row(title, company, job_type, description):
@@ -174,11 +178,9 @@ def classify_row(title, company, job_type, description):
     )
     result = call_ollama(CLASSIFY_SYSTEM_PROMPT, user_prompt)
     if not result["_ok"]:
-        return {"classification": None,
-                "reason": "Classification failed: " + str(result["_error"])}
+        return {"classification": None}
     p = result["_raw"]
-    return {"classification": _normalize_classification(p.get("classification")),
-            "reason": str(p.get("reason", "")).strip()}
+    return {"classification": _normalize_classification(p.get("classification"))}
 
 
 def classify_row_with_fit(title, company, job_type, description, skills):
@@ -191,9 +193,7 @@ def classify_row_with_fit(title, company, job_type, description, skills):
     )
     result = call_ollama(SKILLS_SYSTEM_PROMPT, user_prompt)
     if not result["_ok"]:
-        return {"classification": None,
-                "reason": "Classification failed: " + str(result["_error"]),
-                "skills_matching": None}
+        return {"classification": None, "skills_matching": None}
     p = result["_raw"]
     sm = p.get("skills_matching")
     try:
@@ -201,7 +201,6 @@ def classify_row_with_fit(title, company, job_type, description, skills):
     except (TypeError, ValueError):
         sm = None
     return {"classification": _normalize_classification(p.get("classification")),
-            "reason":         str(p.get("reason", "")).strip(),
             "skills_matching": sm}
 
 
@@ -346,7 +345,6 @@ print("\n✓ Classification complete.")
 
 
 df["classification"] = [r["classification"] for r in results]
-df["match_reason"]   = [r["reason"]         for r in results]
 
 if fit_mode:
     df["skills_matching"] = [r["skills_matching"] for r in results]
@@ -355,19 +353,17 @@ stem      = OUT_PATH.rsplit(".", 1)[0] if OUT_PATH else CSV_PATH.rsplit(".", 1)[
 full_path = stem + "_classified.csv"
 df.to_csv(full_path, index=False)
 
-n_ws    = (df["classification"] == "working_student").sum()
-n_not   = (df["classification"] == "not_working_student").sum()
-n_unsure= (df["classification"] == "unsure").sum()
-n_err   = df["classification"].isna().sum()
+n_yes = (df["classification"] == "yes").sum()
+n_no  = (df["classification"] == "no").sum()
+n_err = df["classification"].isna().sum()
 
 print(f"Saved full results ({len(df)} rows) → {full_path}")
-print(f"  working_student:     {n_ws}")
-print(f"  not_working_student: {n_not}  ← will be dropped in final output")
-print(f"  unsure:              {n_unsure}")
-print(f"  errors:              {n_err}")
+print(f"  yes (working student): {n_yes}")
+print(f"  no:                    {n_no}  ← will be dropped in final output")
+print(f"  errors:                {n_err}")
 
 
-final_df = df[df["classification"].isin(["working_student", "unsure"])].copy()
+final_df = df[df["classification"] == "yes"].copy()
 
 if fit_mode and not final_df.empty:
     final_df = final_df.sort_values("skills_matching", ascending=False)
@@ -377,4 +373,4 @@ final_df.to_csv(final_path, index=False)
 
 sort_note = " (sorted by skills_matching, best first)" if fit_mode else ""
 print(f"Saved final results ({len(final_df)} rows) → {final_path}{sort_note}")
-print(f"  not_working_student rows dropped: {n_not}")
+print(f"  no rows dropped: {n_no}")
