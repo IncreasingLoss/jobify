@@ -204,5 +204,5 @@ if __name__ == "__main__":
         jobs_dropped = jobs.drop_duplicates(subset=['_title_key', '_company_key'], keep='first')
         jobs_dropped = jobs_dropped.drop(columns=['_title_key', '_company_key'])
 
-        jobs_dropped.to_csv("jobspy/jobs_scraped.csv")
+        jobs_dropped.to_csv("jobify/jobs_scraped.csv")
         print(jobs_dropped.head(8))

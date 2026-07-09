@@ -15,16 +15,16 @@ MAX_WORKERS = 6 # parralel running instances of classification llm
 # requires $env:OLLAMA_NUM_PARALLEL = "6" aas gloabal powershell command
 
 # Input / output
-CSV_PATH = f"{cwd}\\jobs_scraped.csv"   # path to your scraped jobs CSV
+CSV_PATH = f"{cwd}\\jobify\\jobs_scraped.csv"   # path to your scraped jobs CSV
 OUT_PATH = None         # None → auto-named  <csv_stem>_classified.csv  and  _final.csv
 
 # Skills profile  (enables 0-100 % skills_matching column)
 # Accepted CSV shape  (any columns, one row per skill):
 
-SKILLS = f"{cwd}\\skill_profile.csv" #None
+SKILLS = f"{cwd}\\jobify\\skill_profile.csv" #None
 
 # Set to an integer (e.g. 10) to process only the first N rows — useful for quick tests
-LIMIT = 10000000000000000000000000000000 #None
+LIMIT = None # None
 
 # ── Cell 3 · Derived URLs (do not edit) ──────────────────────────────────────
 CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
@@ -305,7 +305,7 @@ print(f"Loaded {len(df)} rows from '{CSV_PATH}'")
 print(f"Columns detected — title: '{title_col}' | description: '{desc_col}' | "
       f"company: '{company_col}' | job_type: '{job_type_col}'")
 if fit_mode:
-    print("\nSkills-matching mode ON. Profile:\n" + skills_profile)
+    print("\n Skills-matching mode ON.")
 
 
 import threading
