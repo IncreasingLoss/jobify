@@ -3,15 +3,17 @@ import os
 import time
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 import requests
 
+begining = time.time()
 
 cwd = os.getcwd()
 
 # Ollama connection
 OLLAMA_BASE_URL = "http://localhost:11434"   # change if Ollama runs on a remote host
-MODEL_NAME      = "gemma4_12b_q5:latest"    # exact name shown by `ollama list`
-MAX_WORKERS = 6 # parralel running instances of classification llm
+MODEL_NAME      = "qwen3:8b"    # exact name shown by `ollama list`
+MAX_WORKERS = 30 # parralel running instances of classification llm
 # requires $env:OLLAMA_NUM_PARALLEL = "6" aas gloabal powershell command
 
 # Input / output
@@ -70,7 +72,9 @@ SKILLS_SYSTEM_PROMPT = CLASSIFY_SYSTEM_PROMPT + """
 You will also receive the candidate's skills and background. Rate the fit between \
 the candidate's skills and the job's requirements as "skills_matching": an integer \
 0-100 (0 = no overlap, 100 = excellent match). Use the full range, not just round \
-numbers.
+numbers. Also make sure that you also calculate the skills in that the applicant is \
+missing not just the matches. Average out how much is missing - compared to what skills match \
+- and the skill level.
 
 Respond with ONLY this JSON and nothing else — no explanation, no reasoning, no \
 extra text:
@@ -114,6 +118,7 @@ def call_ollama(system_prompt, user_prompt, timeout=90, retries=2):
         "format":  "json",
         "stream":  False,
         "options": {"temperature": 0.0},
+        "think": False,
     }
     data = json.dumps(payload).encode("utf-8")
     req  = urllib.request.Request(
@@ -374,3 +379,5 @@ final_df.to_csv(final_path, index=False)
 sort_note = " (sorted by skills_matching, best first)" if fit_mode else ""
 print(f"Saved final results ({len(final_df)} rows) → {final_path}{sort_note}")
 print(f"  no rows dropped: {n_no}")
+ending = time.time()
+print("script_duration: ", (ending-begining)/60, " mins")
