@@ -1,0 +1,17 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+.playwright-mcp/**
+
+# Environments
+.venv/**
+venv/**
+# IDEs and Editors
+.vscode/
+.idea/
+
+# Data files (optional, but often good to ignore large datasets)
+*.csv
+*.json
+*.sqlite3
