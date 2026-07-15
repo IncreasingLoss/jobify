@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jobify</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<script>
+tailwind.config={theme:{extend:{colors:{accent:'#f97316','accent-h':'#fb923c'},fontFamily:{heading:['Space Grotesk','sans-serif'],body:['DM Sans','sans-serif']}}}}
+</script>
+<style>
+*{scrollbar-width:thin;scrollbar-color:#27272a transparent}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#27272a;border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:#3f3f46}
+body{background:#09090b}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
+.fade-up{animation:fadeUp .5s ease both}
+.fade-up-d1{animation-delay:.1s}.fade-up-d2{animation-delay:.2s}
+.pulse-dot{animation:pulse-dot 2s ease infinite}
+input[type=range]{-webkit-appearance:none;background:transparent;height:20px}
+input[type=range]::-webkit-slider-runnable-track{height:4px;background:#27272a;border-radius:2px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#f97316;margin-top:-5px;cursor:pointer}
+input[type=range]::-moz-range-track{height:4px;background:#27272a;border-radius:2px;border:0}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#f97316;border:0;cursor:pointer}
+.badge{font-size:11px;padding:2px 8px;border-radius:6px;font-weight:500;white-space:nowrap}
+.badge-yes{background:rgba(34,197,94,.12);color:#4ade80}
+.badge-no{background:rgba(239,68,68,.10);color:#f87171}
+.match-bar{height:6px;border-radius:3px;background:#27272a;overflow:hidden;width:80px;display:inline-block;vertical-align:middle;margin-right:6px}
+.match-fill{height:100%;border-radius:3px;transition:width .4s ease}
+</style>
+</head>
+<body class="text-zinc-100 font-body min-h-screen">
+
+<!-- Background glow -->
+<div class="fixed inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+<div class="absolute -top-40 -left-40 w-[500px] h-[500px] bg-orange-500/[.04] rounded-full blur-[120px]"></div>
+<div class="absolute -bottom-40 -right-40 w-[400px] h-[400px] bg-amber-500/[.03] rounded-full blur-[100px]"></div>
+</div>
+
+<div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 py-8">
+
+<!-- Header -->
+<header class="flex items-center justify-between mb-10 fade-up">
+<div>
+<h1 class="font-heading text-3xl font-bold tracking-tight text-white">JOBIFY</h1>
+<p class="text-zinc-500 text-sm mt-0.5">Scrape, classify &amp; filter jobs with AI</p>
+</div>
+<div id="ollama-badge" class="flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
+<span class="w-2 h-2 rounded-full bg-zinc-600 pulse-dot"></span>
+<span class="text-zinc-500">Checking Ollama…</span>
+</div>
+</header>
+
+<!-- ═══════════ SECTION 1: SEARCH ═══════════ -->
+<section class="mb-14 fade-up fade-up-d1">
+<div class="flex items-center gap-3 mb-5">
+<div class="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center"><i class="fa-solid fa-magnifying-glass text-orange-400 text-sm"></i></div>
+<h2 class="font-heading text-xl font-semibold">Job Search</h2>
+</div>
+
+<div class="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 sm:p-6 backdrop-blur-sm">
+
+<!-- Row 1: Keywords + Location + Button -->
+<div class="flex flex-col sm:flex-row gap-3 mb-4">
+<div class="flex-1">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1 block">Keywords</label>
+<input id="inp-kw" type="text" value="Data Scientist Analyst" placeholder="e.g. Data Scientist, Python Developer…"
+  class="w-full bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/20 transition">
+</div>
+<div class="w-full sm:w-56">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1 block">Location</label>
+<input id="inp-loc" type="text" value="München" placeholder="e.g. München, Berlin…"
+  class="w-full bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/20 transition">
+</div>
+<div class="flex items-end">
+<button id="btn-scrape" onclick="startScrape()"
+  class="w-full sm:w-auto bg-orange-500 hover:bg-orange-400 active:bg-orange-600 text-black font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2 whitespace-nowrap">
+<i class="fa-solid fa-magnifying-glass text-xs"></i> Search Jobs
+</button>
+</div>
+</div>
+
+<!-- Row 2: Advanced -->
+<details class="mb-4 group">
+<summary class="text-[11px] text-zinc-600 cursor-pointer hover:text-zinc-400 transition-colors uppercase tracking-wider select-none">Advanced options</summary>
+<div class="mt-3 flex flex-wrap gap-x-6 gap-y-3 items-end">
+<div>
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 block">Sites</label>
+<div class="flex gap-3 text-sm text-zinc-400">
+<label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" id="chk-gd" checked class="accent-orange-500 w-3.5 h-3.5"> Glassdoor</label>
+<label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" id="chk-in" checked class="accent-orange-500 w-3.5 h-3.5"> Indeed</label>
+<label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" id="chk-li" checked class="accent-orange-500 w-3.5 h-3.5"> LinkedIn</label>
+</div>
+</div>
+<div>
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 block">Hours old</label>
+<input id="inp-hours" type="number" value="240" class="w-20 bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-orange-500/50 transition">
+</div>
+<div>
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 block">Or load CSV</label>
+<label class="flex items-center gap-2 text-sm text-zinc-500 bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2 cursor-pointer hover:border-zinc-600 transition-colors">
+<i class="fa-solid fa-upload text-xs"></i>
+<span id="csv-name">Choose file</span>
+<input type="file" id="inp-csv" accept=".csv" onchange="loadCsvFile()" class="hidden">
+</label>
+</div>
+</div>
+</details>
+
+<!-- Row 3: AI Google Query -->
+<div class="flex gap-3 mb-4 items-end">
+<div class="flex-1">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1 block">Google Search Query <span class="normal-case text-zinc-700">(AI-generated)</span></label>
+<input id="inp-gquery" type="text" placeholder="Click Generate to create an optimized Google search query…"
+  class="w-full bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/20 transition">
+</div>
+<button id="btn-genq" onclick="genQuery()"
+  class="bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-750 text-zinc-300 border border-zinc-700/60 px-4 py-2.5 rounded-lg text-sm transition-colors flex items-center gap-2 whitespace-nowrap">
+<i class="fa-solid fa-wand-magic-sparkles text-xs"></i> Generate
+</button>
+</div>
+
+<!-- Progress -->
+<div id="scrape-prog" class="hidden mb-4">
+<div class="flex justify-between text-[11px] text-zinc-500 mb-1.5">
+<span id="scrape-prog-txt">Starting…</span>
+</div>
+<div class="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+<div id="scrape-prog-bar" class="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all duration-700 ease-out" style="width:0%"></div>
+</div>
+<div id="scrape-sites" class="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs"></div>
+</div>
+
+<!-- Stats -->
+<div id="scrape-stats" class="hidden mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm py-3 px-4 rounded-lg bg-zinc-800/30 border border-zinc-800/50">
+<span class="text-zinc-500"><span id="s-raw" class="text-zinc-200 font-medium">0</span> raw</span>
+<i class="fa-solid fa-arrow-right text-zinc-700 text-[10px]"></i>
+<span class="text-zinc-500"><span id="s-dup" class="text-red-400/80 font-medium">0</span> duplicates</span>
+<i class="fa-solid fa-arrow-right text-zinc-700 text-[10px]"></i>
+<span class="text-zinc-500"><span id="s-uni" class="text-emerald-400/80 font-medium">0</span> unique</span>
+<div class="flex-1"></div>
+<button onclick="exportScraped()" class="text-orange-400 hover:text-orange-300 text-sm flex items-center gap-1.5 transition-colors"><i class="fa-solid fa-download text-xs"></i> Export CSV</button>
+</div>
+
+<!-- Table -->
+<div id="scrape-tbl-wrap" class="hidden overflow-auto max-h-[420px] rounded-xl border border-zinc-800/60">
+<table class="w-full text-sm">
+<thead class="bg-zinc-800/60 sticky top-0 z-10">
+<tr class="text-left text-[11px] text-zinc-500 uppercase tracking-wider">
+<th class="px-4 py-2.5 font-medium">Title</th>
+<th class="px-4 py-2.5 font-medium">Company</th>
+<th class="px-4 py-2.5 font-medium">Location</th>
+<th class="px-4 py-2.5 font-medium">Site</th>
+<th class="px-4 py-2.5 font-medium">Date</th>
+<th class="px-4 py-2.5 font-medium w-10"></th>
+</tr>
+</thead>
+<tbody id="scrape-tbody" class="divide-y divide-zinc-800/40"></tbody>
+</table>
+</div>
+<div id="scrape-pages" class="hidden flex justify-center gap-1.5 mt-4"></div>
+<div id="scrape-empty" class="text-center py-16 text-zinc-700">
+<i class="fa-solid fa-briefcase text-3xl mb-3 block opacity-50"></i>
+<p class="text-sm">No jobs yet. Enter keywords and search to get started.</p>
+</div>
+
+</div>
+</section>
+
+<!-- ═══════════ SECTION 2: MATCHING ═══════════ -->
+<section class="mb-16 fade-up fade-up-d2">
+<div class="flex items-center gap-3 mb-5">
+<div class="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center"><i class="fa-solid fa-brain text-orange-400 text-sm"></i></div>
+<h2 class="font-heading text-xl font-semibold">Job Matching</h2>
+</div>
+
+<div class="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 sm:p-6 backdrop-blur-sm">
+
+<!-- Skills tabs -->
+<div class="flex gap-2 mb-4">
+<button id="tab-build" onclick="switchTab('build')" class="px-4 py-1.5 rounded-lg text-sm font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20 transition-colors">Build Skills</button>
+<button id="tab-upload" onclick="switchTab('upload')" class="px-4 py-1.5 rounded-lg text-sm font-medium text-zinc-500 hover:text-zinc-400 border border-zinc-800 hover:border-zinc-700 transition-colors">Upload CSV</button>
+</div>
+
+<!-- Build skills -->
+<div id="panel-build" class="mb-4">
+<div class="flex justify-between items-center mb-2">
+<span class="text-[11px] text-zinc-500 uppercase tracking-wider">Your skills &middot; <span id="sk-count">0</span> entries</span>
+<div class="flex gap-3">
+<button onclick="loadDefaults()" class="text-xs text-zinc-600 hover:text-zinc-300 transition-colors">Load defaults</button>
+<button onclick="clearSkills()" class="text-xs text-zinc-600 hover:text-red-400 transition-colors">Clear all</button>
+</div>
+</div>
+<div id="sk-tbl-wrap" class="overflow-auto max-h-[260px] rounded-xl border border-zinc-800/60 mb-2">
+<table class="w-full text-sm">
+<thead class="bg-zinc-800/60 sticky top-0 z-10">
+<tr class="text-left text-[11px] text-zinc-500 uppercase tracking-wider">
+<th class="px-3 py-2 w-6"></th>
+<th class="px-3 py-2 font-medium">Skill</th>
+<th class="px-3 py-2 font-medium w-44">Level</th>
+<th class="px-3 py-2 font-medium w-36">Area</th>
+<th class="px-3 py-2 w-8"></th>
+</tr>
+</thead>
+<tbody id="sk-tbody" class="divide-y divide-zinc-800/40"></tbody>
+</table>
+</div>
+<button onclick="addSkill()" class="text-sm text-orange-400 hover:text-orange-300 flex items-center gap-1.5 transition-colors"><i class="fa-solid fa-plus text-xs"></i> Add skill</button>
+</div>
+
+<!-- Upload skills CSV -->
+<div id="panel-upload" class="hidden mb-4">
+<label class="flex flex-col items-center justify-center h-32 border-2 border-dashed border-zinc-700/60 rounded-xl cursor-pointer hover:border-zinc-600 transition-colors">
+<i class="fa-solid fa-file-csv text-2xl text-zinc-700 mb-2"></i>
+<span class="text-sm text-zinc-500">Drop your skills CSV here or click to browse</span>
+<input type="file" id="inp-skcsv" accept=".csv" onchange="loadSkillsCsv()" class="hidden">
+</label>
+<p id="skcsv-status" class="text-xs text-zinc-600 mt-2"></p>
+</div>
+
+<!-- ── Classification Controls ── -->
+<div class="flex flex-wrap gap-x-4 gap-y-3 items-end pt-4 mt-4 border-t border-zinc-800/60">
+
+<!-- Target Type -->
+<div class="min-w-[180px]">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 block">Target Type</label>
+<select id="sel-target" onchange="updateTargetDesc()"
+  class="w-full bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-orange-500/50 transition">
+<option value="working_student">Working Student</option>
+<option value="fulltime">Full-time</option>
+<option value="parttime">Part-time</option>
+<option value="internship">Internship</option>
+</select>
+<p id="target-desc" class="text-[11px] text-zinc-600 mt-1 leading-snug">University enrollment required, 10-20h/week, flex schedule</p>
+</div>
+
+<!-- Model -->
+<div>
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 block">Model</label>
+<select id="sel-model" class="bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-orange-500/50 transition"><option>Loading…</option></select>
+</div>
+
+<!-- Workers -->
+<div class="w-28">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 flex justify-between"><span>Workers</span><span id="wrk-val" class="text-zinc-400 normal-case">6</span></label>
+<input id="rng-wrk" type="range" min="1" max="20" value="6" oninput="document.getElementById('wrk-val').textContent=this.value" class="w-full">
+</div>
+
+<div class="flex-1"></div>
+
+<!-- Classify Button -->
+<button id="btn-classify" onclick="startClassify()" disabled
+  class="bg-orange-500 hover:bg-orange-400 active:bg-orange-600 text-black font-semibold px-6 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+<i class="fa-solid fa-brain text-xs"></i> Classify Jobs
+</button>
+</div>
+
+<!-- Classify progress -->
+<div id="cls-prog" class="hidden mt-4">
+<div class="flex justify-between text-[11px] text-zinc-500 mb-1.5">
+<span id="cls-prog-txt">Starting…</span>
+<span id="cls-prog-pct">0%</span>
+</div>
+<div class="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+<div id="cls-prog-bar" class="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all duration-300 ease-out" style="width:0%"></div>
+</div>
+</div>
+
+<!-- Classify stats -->
+<div id="cls-stats" class="hidden mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm py-3 px-4 rounded-lg bg-zinc-800/30 border border-zinc-800/50">
+<span class="text-zinc-500 text-xs">Classified as <strong id="c-type" class="text-zinc-300 normal-case">working student</strong></span>
+<span class="text-zinc-700">|</span>
+<span class="text-emerald-400"><i class="fa-solid fa-check mr-1 text-xs"></i><span id="c-match">0</span> matched</span>
+<span class="text-red-400/80"><i class="fa-solid fa-xmark mr-1 text-xs"></i><span id="c-reject">0</span> rejected</span>
+<span class="text-amber-400/80"><i class="fa-solid fa-triangle-exclamation mr-1 text-xs"></i><span id="c-err">0</span> errors</span>
+<div class="flex-1"></div>
+<button onclick="exportFinal()" class="text-orange-400 hover:text-orange-300 text-sm flex items-center gap-1.5 transition-colors"><i class="fa-solid fa-download text-xs"></i> Export Final CSV</button>
+</div>
+
+<!-- Post-classification filters -->
+<div id="cls-filters" class="hidden flex flex-wrap gap-x-5 gap-y-3 items-end mt-4 pt-4 border-t border-zinc-800/60">
+<div class="w-44">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 flex justify-between"><span>Min Match</span><span id="match-val" class="text-orange-400 normal-case">0%</span></label>
+<input id="rng-match" type="range" min="0" max="100" value="0" oninput="document.getElementById('match-val').textContent=this.value+'%';applyFilter()" class="w-full">
+</div>
+<label class="flex items-center gap-2 text-sm text-zinc-400 pb-1 cursor-pointer select-none">
+<input id="chk-match" type="checkbox" onchange="applyFilter()" class="accent-orange-500 w-3.5 h-3.5">
+Only matching skills
+</label>
+<label class="flex items-center gap-2 text-sm text-zinc-500 pb-1 cursor-pointer select-none">
+<input id="chk-rejected" type="checkbox" onchange="applyFilter()" class="accent-zinc-500 w-3.5 h-3.5">
+Show rejected
+</label>
+</div>
+
+<!-- Classify table -->
+<div id="cls-tbl-wrap" class="hidden overflow-auto max-h-[420px] rounded-xl border border-zinc-800/60 mt-4">
+<table class="w-full text-sm">
+<thead class="bg-zinc-800/60 sticky top-0 z-10">
+<tr class="text-left text-[11px] text-zinc-500 uppercase tracking-wider">
+<th class="px-4 py-2.5 font-medium">Title</th>
+<th class="px-4 py-2.5 font-medium">Company</th>
+<th class="px-4 py-2.5 font-medium w-24">Match</th>
+<th class="px-4 py-2.5 font-medium w-36">Skills Match</th>
+<th class="px-4 py-2.5 font-medium">Location</th>
+<th class="px-4 py-2.5 font-medium w-10"></th>
+</tr>
+</thead>
+<tbody id="cls-tbody" class="divide-y divide-zinc-800/40"></tbody>
+</table>
+</div>
+<div id="cls-pages" class="hidden flex justify-center gap-1.5 mt-4"></div>
+<div id="cls-empty" class="text-center py-16 text-zinc-700">
+<i class="fa-solid fa-filter text-3xl mb-3 block opacity-50"></i>
+<p class="text-sm">Classify jobs to see matched results here.</p>
+</div>
+
+</div>
+</section>
+
+</div>
+
+<!-- Toast container -->
+<div id="toasts" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+<script>
+/* ── Utilities ── */
+const $ = id => document.getElementById(id);
+const esc = s => { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML };
+const escA = s => s ? s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+const PER = 50;
+let skills = [], scrapePoll = null, clsPoll = null;
+
+/* Descriptions shown below the target type dropdown */
+const TYPE_DESC = {
+  working_student: 'University enrollment required, 10-20h/week, flex schedule',
+  fulltime: '35-40 hours/week, no student requirement',
+  parttime: '~20 hours/week, no student requirement',
+  internship: '20-40 hours, practical experience, fixed-term placement'
+};
+const TYPE_LABEL = {
+  working_student: 'working student',
+  fulltime: 'full-time',
+  parttime: 'part-time',
+  internship: 'internship'
+};
+
+function updateTargetDesc() {
+  const t = $('sel-target').value;
+  $('target-desc').textContent = TYPE_DESC[t] || '';
+}
+
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  const colors = {
+    success: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+    error: 'border-red-500/40 bg-red-500/10 text-red-300',
+    info: 'border-zinc-600/40 bg-zinc-800/90 text-zinc-300'
+  };
+  el.className = `pointer-events-auto px-4 py-2.5 rounded-lg border text-sm backdrop-blur-sm shadow-lg ${colors[type] || colors.info}`;
+  el.style.animation = 'fadeUp .3s ease both';
+  el.textContent = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300) }, 3500);
+}
+
+function pagination(wrapId, page, pages, fn) {
+  const w = $(wrapId);
+  if (!w) return;
+  if (pages <= 1) { w.classList.add('hidden'); return; }
+  w.classList.remove('hidden');
+  let h = '';
+  const btn = (p, label, disabled, active) =>
+    `<button onclick="${fn.name}(${p})" ${disabled ? 'disabled' : ''} class="w-8 h-8 rounded-lg text-xs flex items-center justify-center transition-colors ${active ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 border border-transparent'} ${disabled ? 'opacity-30 cursor-not-allowed' : ''}">${label}</button>`;
+  h += btn(page - 1, '‹', page <= 1);
+  for (let i = 1; i <= pages; i++) {
+    if (pages > 7 && i > 2 && i < pages - 1 && Math.abs(i - page) > 1) {
+      if (i === 3 || i === pages - 2) h += '<span class="w-8 h-8 flex items-center justify-center text-zinc-600 text-xs">…</span>';
+      continue;
+    }
+    h += btn(i, i, false, i === page);
+  }
+  h += btn(page + 1, '›', page >= pages);
+  w.innerHTML = h;
+}
+
+/* ── Ollama ── */
+async function checkOllama() {
+  try {
+    const r = await fetch('/api/ollama-status'), d = await r.json();
+    const b = $('ollama-badge');
+    if (d.connected) {
+      b.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 pulse-dot"></span><span class="text-zinc-400 text-xs">${d.models.length} model${d.models.length !== 1 ? 's' : ''}</span>`;
+      const s = $('sel-model');
+      s.innerHTML = d.models.map(m => `<option value="${escA(m)}" ${m.includes('qwen') ? 'selected' : ''}>${esc(m)}</option>`).join('');
+      $('btn-classify').disabled = false;
+    } else {
+      b.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500"></span><span class="text-red-400/80 text-xs">Ollama offline</span>`;
+      $('btn-classify').disabled = true;
+      $('sel-model').innerHTML = '<option>Unavailable</option>';
+    }
+  } catch (e) {
+    $('ollama-badge').innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500"></span><span class="text-red-400/80 text-xs">Error</span>`;
+  }
+}
+
+/* ── Generate Query ── */
+async function genQuery() {
+  const kw = $('inp-kw').value.trim(), loc = $('inp-loc').value.trim();
+  if (!kw) return toast('Enter keywords first', 'error');
+  const btn = $('btn-genq');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Wait…';
+  try {
+    const r = await fetch('/api/generate-query', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keywords: kw, location: loc, model: $('sel-model').value })
+    });
+    const d = await r.json();
+    if (d.query) { $('inp-gquery').value = d.query; toast('Query generated', 'success'); }
+    else toast(d.error || 'Generation failed', 'error');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles text-xs"></i> Generate';
+}
+
+/* ── Scrape ── */
+async function startScrape() {
+  const kw = $('inp-kw').value.trim();
+  if (!kw) return toast('Enter keywords', 'error');
+  const sites = [];
+  if ($('chk-gd').checked) sites.push('glassdoor');
+  if ($('chk-in').checked) sites.push('indeed');
+  if ($('chk-li').checked) sites.push('linkedin');
+  if (!sites.length) return toast('Select at least one site', 'error');
+  const btn = $('btn-scrape');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Searching…';
+  $('scrape-prog').classList.remove('hidden');
+  $('scrape-stats').classList.add('hidden');
+  $('scrape-tbl-wrap').classList.add('hidden');
+  $('scrape-pages').classList.add('hidden');
+  $('scrape-empty').classList.add('hidden');
+  $('scrape-prog-bar').style.width = '10%';
+  try {
+    await fetch('/api/scrape', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        keywords: kw, location: $('inp-loc').value.trim(), sites,
+        hours_old: parseInt($('inp-hours').value) || 240,
+        google_query: $('inp-gquery').value.trim(), model: $('sel-model').value
+      })
+    });
+    scrapePoll = setInterval(pollScrape, 1500);
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-magnifying-glass text-xs"></i> Search Jobs';
+  }
+}
+
+async function pollScrape() {
+  try {
+    const r = await fetch('/api/scrape-status'), d = await r.json();
+    $('scrape-prog-txt').textContent = d.progress;
+    const sites = d.site_status || {};
+    let sh = '';
+    for (const [s, st] of Object.entries(sites)) {
+      let c = 'text-zinc-600', ic = 'fa-circle';
+      if (st === 'running') { c = 'text-orange-400'; ic = 'fa-circle-notch fa-spin'; }
+      else if (st === 'pending') { c = 'text-zinc-700'; ic = 'fa-circle'; }
+      else if (st === 'no results') { c = 'text-zinc-500'; ic = 'fa-minus'; }
+      else if (st.startsWith('done')) { c = 'text-emerald-400'; ic = 'fa-check'; }
+      else if (st.startsWith('error')) { c = 'text-red-400'; ic = 'fa-xmark'; }
+      sh += `<span class="${c} flex items-center gap-1.5"><i class="fa-solid ${ic} text-[9px]"></i>${esc(s)}</span>`;
+    }
+    $('scrape-sites').innerHTML = sh;
+    if (d.status === 'done' || d.status === 'error') {
+      clearInterval(scrapePoll);
+      $('btn-scrape').disabled = false;
+      $('btn-scrape').innerHTML = '<i class="fa-solid fa-magnifying-glass text-xs"></i> Search Jobs';
+      $('scrape-prog-bar').style.width = '100%';
+      if (d.status === 'done') {
+        $('scrape-stats').classList.remove('hidden');
+        $('s-raw').textContent = d.total_raw;
+        $('s-dup').textContent = d.duplicates;
+        $('s-uni').textContent = d.total_deduped;
+        if (d.total_deduped > 0) { await loadScrapeData(1); $('scrape-tbl-wrap').classList.remove('hidden'); }
+        else { $('scrape-empty').classList.remove('hidden'); $('scrape-empty').querySelector('p').textContent = 'No jobs found. Try different keywords.'; }
+      } else { toast(d.progress || 'Scraping failed', 'error'); }
+      setTimeout(() => $('scrape-prog').classList.add('hidden'), 2000);
+    } else {
+      const totalSites = Object.keys(sites).length;
+      let done = Object.values(sites).filter(v => v !== 'pending' && v !== 'running').length;
+      $('scrape-prog-bar').style.width = Math.max(10, Math.round(done / totalSites * 90)) + '%';
+    }
+  } catch (e) { clearInterval(scrapePoll); }
+}
+
+async function loadScrapeData(page) {
+  try {
+    const r = await fetch(`/api/scrape-data?page=${page}&per_page=${PER}`), d = await r.json();
+    const tb = $('scrape-tbody');
+    if (!d.data.length) {
+      tb.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-zinc-600">No data</td></tr>';
+    } else {
+      tb.innerHTML = d.data.map(j =>
+        `<tr class="hover:bg-zinc-800/20 transition-colors">
+          <td class="px-4 py-2.5 max-w-[300px]"><div class="truncate font-medium text-zinc-200" title="${escA(j.description || '')}">${esc(j.title || '')}</div></td>
+          <td class="px-4 py-2.5 text-zinc-400 max-w-[140px] truncate">${esc(j.company || '')}</td>
+          <td class="px-4 py-2.5 text-zinc-500 text-xs whitespace-nowrap">${esc(j.location || '')}</td>
+          <td class="px-4 py-2.5"><span class="badge bg-zinc-800/80 text-zinc-400">${esc(j.site || '')}</span></td>
+          <td class="px-4 py-2.5 text-zinc-500 text-xs whitespace-nowrap">${esc(j.date_posted || '')}</td>
+          <td class="px-4 py-2.5 text-center">${j.job_url ? `<a href="${escA(j.job_url)}" target="_blank" rel="noopener" class="text-orange-400/70 hover:text-orange-400 transition-colors"><i class="fa-solid fa-arrow-up-right-from-square text-xs"></i></a>` : ''}</td>
+        </tr>`
+      ).join('');
+    }
+    pagination('scrape-pages', d.page, d.pages, loadScrapeData);
+  } catch (e) { toast('Error loading data', 'error'); }
+}
+
+async function loadCsvFile() {
+  const f = $('inp-csv').files[0];
+  if (!f) return;
+  $('csv-name').textContent = f.name;
+  const fd = new FormData();
+  fd.append('file', f);
+  try {
+    const r = await fetch('/api/load-csv', { method: 'POST', body: fd }), d = await r.json();
+    if (d.error) return toast(d.error, 'error');
+    $('scrape-stats').classList.remove('hidden');
+    $('scrape-empty').classList.add('hidden');
+    $('s-raw').textContent = d.total_raw;
+    $('s-dup').textContent = d.duplicates;
+    $('s-uni').textContent = d.total_deduped;
+    if (d.total_deduped > 0) { await loadScrapeData(1); $('scrape-tbl-wrap').classList.remove('hidden'); }
+    toast(`Loaded ${d.total_deduped} jobs from ${f.name}`, 'success');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+function exportScraped() { window.open('/api/export/scraped', '_blank'); }
+
+/* ── Skills Builder ── */
+const DEFAULT_SKILLS = [
+  { name: 'Python', level: 70, area: 'python' }, { name: 'NumPy', level: 75, area: 'python' }, { name: 'Pandas', level: 90, area: 'python' },
+  { name: 'MCP-Server', level: 66, area: 'python' }, { name: 'Matplotlib', level: 90, area: 'python' }, { name: 'TensorFlow', level: 15, area: 'python' },
+  { name: 'PyTorch', level: 70, area: 'python' }, { name: 'GLUE', level: 80, area: 'aws' }, { name: 'QuickSight', level: 100, area: 'aws' },
+  { name: 'Hadoop/PySpark', level: 50, area: 'aws' }, { name: 'Data Optimization', level: 75, area: 'aws' }, { name: 'Data Governance', level: 83, area: 'aws' },
+  { name: 'PowerShell', level: 40, area: 'shell' }, { name: 'API Design', level: 40, area: 'shell' },
+  { name: 'MySQL', level: 65, area: 'sql' }, { name: 'PostgreSQL', level: 83, area: 'sql' }, { name: 'SQLite', level: 80, area: 'sql' },
+  { name: 'LLMs', level: 75, area: 'ai' }, { name: 'Computer Vision', level: 85, area: 'ai' }, { name: 'Transformers', level: 80, area: 'ai' },
+  { name: 'Linear Models', level: 75, area: 'ai' }, { name: 'Data Science', level: 85, area: 'ai' }, { name: 'Markdown', level: 90, area: 'ai' },
+  { name: 'Blender', level: 90, area: '3d' }, { name: 'Houdini', level: 90, area: '3d' },
+  { name: 'Adobe Suite', level: 80, area: 'adobe' }, { name: 'MS Office', level: 75, area: 'office' }, { name: 'Google Docs', level: 80, area: 'office' },
+  { name: 'Statistics', level: 77, area: 'stats' }, { name: 'Math', level: 50, area: 'stats' },
+  { name: 'English', level: 88, area: 'language' }, { name: 'German', level: 100, area: 'language' },
+];
+
+function loadDefaults() { skills = JSON.parse(JSON.stringify(DEFAULT_SKILLS)); renderSkills(); toast('Default skills loaded', 'success'); }
+function clearSkills() { skills = []; renderSkills(); }
+function addSkill() {
+  skills.push({ name: '', level: 50, area: 'other' }); renderSkills();
+  const rows = $('sk-tbody').querySelectorAll('tr');
+  if (rows.length) rows[rows.length - 1].querySelector('input').focus();
+}
+function removeSkill(i) { skills.splice(i, 1); renderSkills(); }
+function renderSkills() {
+  $('sk-count').textContent = skills.length;
+  const tb = $('sk-tbody');
+  if (!skills.length) {
+    tb.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-zinc-700 text-xs">No skills added</td></tr>';
+    return;
+  }
+  tb.innerHTML = skills.map((s, i) =>
+    `<tr class="hover:bg-zinc-800/20 transition-colors">
+      <td class="px-3 py-1.5 text-center"><span class="inline-block w-2 h-2 rounded-full bg-orange-500/40"></span></td>
+      <td class="px-3 py-1.5"><input value="${escA(s.name)}" onchange="skills[${i}].name=this.value" class="w-full bg-transparent border-b border-zinc-800 focus:border-orange-500/40 focus:outline-none text-sm text-zinc-200 pb-0.5 transition" placeholder="Skill name"></td>
+      <td class="px-3 py-1.5"><div class="flex items-center gap-2"><input type="range" min="0" max="100" value="${s.level}" oninput="skills[${i}].level=parseInt(this.value);this.nextElementSibling.textContent=this.value+'%'" class="flex-1"><span class="text-xs text-zinc-500 w-9 text-right">${s.level}%</span></div></td>
+      <td class="px-3 py-1.5"><input value="${escA(s.area)}" onchange="skills[${i}].area=this.value" class="w-full bg-transparent border-b border-zinc-800 focus:border-orange-500/40 focus:outline-none text-xs text-zinc-400 pb-0.5 transition" placeholder="area"></td>
+      <td class="px-3 py-1.5 text-center"><button onclick="removeSkill(${i})" class="text-zinc-700 hover:text-red-400 transition-colors"><i class="fa-solid fa-xmark text-xs"></i></button></td>
+    </tr>`
+  ).join('');
+}
+
+function switchTab(t) {
+  $('tab-build').className = t === 'build' ? 'px-4 py-1.5 rounded-lg text-sm font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20 transition-colors' : 'px-4 py-1.5 rounded-lg text-sm font-medium text-zinc-500 hover:text-zinc-400 border border-zinc-800 hover:border-zinc-700 transition-colors';
+  $('tab-upload').className = t === 'upload' ? 'px-4 py-1.5 rounded-lg text-sm font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20 transition-colors' : 'px-4 py-1.5 rounded-lg text-sm font-medium text-zinc-500 hover:text-zinc-400 border border-zinc-800 hover:border-zinc-700 transition-colors';
+  $('panel-build').classList.toggle('hidden', t !== 'build');
+  $('panel-upload').classList.toggle('hidden', t !== 'upload');
+}
+
+function loadSkillsCsv() {
+  const f = $('inp-skcsv').files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const lines = e.target.result.trim().split('\n');
+    const parsed = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = lines[i].split('|').map(c => c.trim());
+      if (cells.length >= 2 && cells[1] && !cells[1].match(/^\d+$/) && cells[1] !== 'name') {
+        let lvl = parseInt((cells[2] || '50').replace('%', '')) || 50;
+        parsed.push({ name: cells[1], level: Math.max(0, Math.min(100, lvl)), area: cells[3] || 'other' });
+      }
+    }
+    if (parsed.length) {
+      skills = parsed; renderSkills();
+      $('skcsv-status').textContent = `Loaded ${parsed.length} skills from ${f.name}`;
+      $('skcsv-status').className = 'text-xs text-emerald-400/60 mt-2';
+      toast(`Imported ${parsed.length} skills`, 'success');
+    } else {
+      $('skcsv-status').textContent = 'Could not parse any skills from this file.';
+      $('skcsv-status').className = 'text-xs text-red-400/60 mt-2';
+    }
+  };
+  reader.readAsText(f);
+}
+
+/* ── Classify ── */
+async function startClassify() {
+  const target = $('sel-target').value;
+  const btn = $('btn-classify');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Classifying…';
+  $('cls-prog').classList.remove('hidden');
+  $('cls-stats').classList.add('hidden');
+  $('cls-filters').classList.add('hidden');
+  $('cls-tbl-wrap').classList.add('hidden');
+  $('cls-pages').classList.add('hidden');
+  $('cls-empty').classList.add('hidden');
+  const validSkills = skills.filter(s => s.name.trim());
+  try {
+    await fetch('/api/classify', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target_type: target,
+        skills: validSkills.length ? validSkills : null,
+        model: $('sel-model').value,
+        max_workers: parseInt($('rng-wrk').value) || 6
+      })
+    });
+    clsPoll = setInterval(pollClassify, 1200);
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-brain text-xs"></i> Classify Jobs';
+  }
+}
+
+async function pollClassify() {
+  try {
+    const r = await fetch('/api/classify-status'), d = await r.json();
+    const pct = d.total ? Math.round(d.current / d.total * 100) : 0;
+    $('cls-prog-bar').style.width = pct + '%';
+    $('cls-prog-pct').textContent = pct + '%';
+    $('cls-prog-txt').textContent = d.progress;
+    if (d.status === 'done' || d.status === 'error') {
+      clearInterval(clsPoll);
+      $('btn-classify').disabled = false;
+      $('btn-classify').innerHTML = '<i class="fa-solid fa-brain text-xs"></i> Classify Jobs';
+      $('cls-prog-bar').style.width = '100%';
+      if (d.status === 'done') {
+        $('cls-stats').classList.remove('hidden');
+        $('c-type').textContent = TYPE_LABEL[d.target_type] || d.target_type;
+        $('c-match').textContent = d.stats.matched;
+        $('c-reject').textContent = d.stats.rejected;
+        $('c-err').textContent = d.stats.error;
+        $('cls-filters').classList.remove('hidden');
+        await applyFilter();
+      } else { toast(d.progress || 'Classification failed', 'error'); }
+      setTimeout(() => $('cls-prog').classList.add('hidden'), 2000);
+    }
+  } catch (e) { clearInterval(clsPoll); }
+}
+
+/* ── Render a single classify result row ── */
+function renderClsRow(j) {
+  const isMatch = j.is_right_jobtype === 'yes';
+  const matchBadge = isMatch
+    ? '<span class="badge badge-yes"><i class="fa-solid fa-check mr-1 text-[9px]"></i>Match</span>'
+    : '<span class="badge badge-no"><i class="fa-solid fa-xmark mr-1 text-[9px]"></i>No</span>';
+
+  const sm = j.skills_matching;
+  const smColor = sm === null ? '' : sm >= 70 ? 'bg-emerald-500' : sm >= 40 ? 'bg-amber-500' : 'bg-red-500';
+  const smText = sm !== null
+    ? `<div class="match-bar"><div class="match-fill ${smColor}" style="width:${sm}%"></div></div><span class="text-xs ${sm >= 70 ? 'text-emerald-400' : sm >= 40 ? 'text-amber-400' : 'text-red-400'}">${sm}%</span>`
+    : '<span class="text-xs text-zinc-700">—</span>';
+
+  return `<tr class="hover:bg-zinc-800/20 transition-colors ${!isMatch ? 'opacity-60' : ''}">
+    <td class="px-4 py-2.5 max-w-[280px]"><div class="truncate font-medium text-zinc-200" title="${escA(j.description || '')}">${esc(j.title || '')}</div></td>
+    <td class="px-4 py-2.5 text-zinc-400 max-w-[130px] truncate">${esc(j.company || '')}</td>
+    <td class="px-4 py-2.5">${matchBadge}</td>
+    <td class="px-4 py-2.5"><div class="flex items-center">${smText}</div></td>
+    <td class="px-4 py-2.5 text-zinc-500 text-xs whitespace-nowrap">${esc(j.location || '')}</td>
+    <td class="px-4 py-2.5 text-center">${j.job_url ? `<a href="${escA(j.job_url)}" target="_blank" rel="noopener" class="text-orange-400/70 hover:text-orange-400 transition-colors"><i class="fa-solid fa-arrow-up-right-from-square text-xs"></i></a>` : ''}</td>
+  </tr>`;
+}
+
+async function applyFilter() {
+  const mm = $('rng-match').value, om = $('chk-match').checked, sr = $('chk-rejected').checked;
+  try {
+    const r = await fetch(`/api/classify-data?page=1&per_page=${PER}&min_match=${mm}&only_matching=${om}&show_rejected=${sr}`), d = await r.json();
+    const tb = $('cls-tbody');
+    if (!d.data.length) {
+      tb.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-zinc-600">No jobs match the current filters</td></tr>';
+      $('cls-tbl-wrap').classList.remove('hidden');
+      $('cls-pages').classList.add('hidden');
+      return;
+    }
+    tb.innerHTML = d.data.map(renderClsRow).join('');
+    $('cls-tbl-wrap').classList.remove('hidden');
+    pagination('cls-pages', d.page, d.pages, loadClsData);
+  } catch (e) { /* silent */ }
+}
+
+async function loadClsData(page) {
+  const mm = $('rng-match').value, om = $('chk-match').checked, sr = $('chk-rejected').checked;
+  try {
+    const r = await fetch(`/api/classify-data?page=${page}&per_page=${PER}&min_match=${mm}&only_matching=${om}&show_rejected=${sr}`), d = await r.json();
+    const tb = $('cls-tbody');
+    tb.innerHTML = d.data.map(renderClsRow).join('');
+    pagination('cls-pages', d.page, d.pages, loadClsData);
+  } catch (e) { /* silent */ }
+}
+
+function exportFinal() {
+  const mm = $('rng-match').value, om = $('chk-match').checked, sr = $('chk-rejected').checked;
+  window.open(`/api/export/final?min_match=${mm}&only_matching=${om}&show_rejected=${sr}`, '_blank');
+}
+
+/* ── Init ── */
+document.addEventListener('DOMContentLoaded', () => { checkOllama(); renderSkills(); updateTargetDesc(); });
+</script>
+</body>
+</html>
