@@ -160,6 +160,16 @@ def scrape_data(page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=2
         df = state["scraped_df"]
     if df is None or df.empty:
         return {"data": [], "total": 0, "page": 1, "pages": 0}
+        
+    # FIX: Enforce strict column order so frontend Object.values() matches table headers
+    strict_order = [
+        "title", "company", "location", "date_posted", 
+        "site", "job_url", "id", "emails", "description", "company_url", "job_type"
+    ]
+    existing_cols = [c for c in strict_order if c in df.columns]
+    other_cols = [c for c in df.columns if c not in strict_order]
+    df = df[existing_cols + other_cols]
+    
     total = len(df)
     pages = max(1, (total + per_page - 1) // per_page)
     start = (page - 1) * per_page
@@ -231,21 +241,33 @@ def classify_status():
 def classify_data(
     page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200),
     min_match: int = Query(0, ge=0, le=100),
-    only_matching: bool = Query(False), show_rejected: bool = Query(False),
+    only_matching: bool = Query(True), # Changed default to True (ticked by default)
+    show_rejected: bool = Query(False), # Ignored now, kept to prevent frontend errors
 ):
     with lock:
         df = state["classified_df"]
         used_skills = state["classify_used_skills"]
     if df is None or df.empty:
         return {"data": [], "total": 0, "page": 1, "pages": 0, "used_skills": False}
-    filtered = df.copy()
-    if not show_rejected:
-        filtered = filtered[filtered["is_right_jobtype"] == "yes"]
+    
+    # FIX: ALWAYS filter to only matching job types (rejecteds are completely ignored)
+    filtered = df[df["is_right_jobtype"] == "yes"].copy()
+    
     has_sm = "skills_matching" in filtered.columns
     if has_sm:
         if only_matching:
             filtered = filtered[filtered["skills_matching"].notna()]
         filtered = filtered[filtered["skills_matching"].fillna(-1) >= min_match]
+        
+    # FIX: Enforce strict column order so frontend Object.values() matches table headers exactly
+    strict_order = [
+        "title", "company", "skills_matching", "location", "date_posted", 
+        "site", "job_url", "is_right_jobtype"
+    ]
+    existing_cols = [c for c in strict_order if c in filtered.columns]
+    other_cols = [c for c in filtered.columns if c not in strict_order]
+    filtered = filtered[existing_cols + other_cols]
+    
     total = len(filtered)
     pages = max(1, (total + per_page - 1) // per_page)
     start = (page - 1) * per_page
@@ -274,16 +296,18 @@ def export_scraped():
 @app.get("/api/export/final")
 def export_final(
     min_match: int = Query(0, ge=0, le=100),
-    only_matching: bool = Query(False), show_rejected: bool = Query(False),
+    only_matching: bool = Query(True), 
+    show_rejected: bool = Query(False),
 ):
     with lock:
         df = state["classified_df"]
         used_skills = state["classify_used_skills"]
     if df is None or df.empty:
         return JSONResponse({"error": "No data"}, status_code=404)
-    filtered = df.copy()
-    if not show_rejected:
-        filtered = filtered[filtered["is_right_jobtype"] == "yes"]
+    
+    # Force only matching job types
+    filtered = df[df["is_right_jobtype"] == "yes"].copy()
+    
     has_sm = "skills_matching" in filtered.columns
     if has_sm:
         if only_matching:

@@ -302,19 +302,19 @@ def generate_google_query(keywords, location, model):
 # ─── AI Variant Generation ───────────────────────────────────────────────────
 
 def _parse_variant_list(text):
-    """Parse a list of strings from Ollama output. Handles JSON arrays, numbered lists, bullet lists, comma-separated."""
+    """Parse a list of strings from Ollama output. Handles JSON arrays, comma-separated, newline-separated, pipe-separated, tab-separated, numbered lists."""
     if not text:
         return []
     text = text.strip()
+    items = []
 
-    # Try JSON array first
+    # 1) JSON array: [...]
     start = text.find("[")
     end = text.rfind("]") + 1
     if start >= 0 and end > start:
         try:
             arr = json.loads(text[start:end])
             if isinstance(arr, list):
-                items = []
                 for item in arr:
                     s = str(item).strip().strip('"').strip("'").strip()
                     if s and not s.isdigit():
@@ -324,91 +324,101 @@ def _parse_variant_list(text):
         except (json.JSONDecodeError, TypeError):
             pass
 
-    # Try numbered list: "1. item" or "1) item"
-    numbered = re.findall(r"(?:^\d+[.)\s]+)(.+)$", text, re.MULTILINE)
-    if numbered:
-        items = [m[1].strip().strip('"').strip("'").strip() for m in numbered]
-        items = [s for s in items if s and not s.isdigit()]
-        if items:
-            return items
+    # 2) All delimiters: comma, semicolon, pipe — whichever produces results first
+    for delim in [",", ";", "|"]:
+        parsed = []
+        for part in text.split(delim):
+            part = part.strip().strip('"').strip("'").strip()
+            if part and not part.isdigit():
+                parsed.append(part)
+        if parsed:
+            return parsed
 
-    # Try bullet list: "- item" or "* item"
-    bullets = re.findall(r"^[•*\-]\s+(.+)$", text, re.MULTILINE)
-    if bullets:
-        items = [m.strip().strip('"').strip("'").strip() for m in bullets]
-        items = [s for s in items if s and not s.isdigit()]
-        if items:
-            return items
-
-    # Fallback: split by newlines, then commas
-    items = []
+    # 3) Numbered list as last resort
     for line in text.split("\n"):
         line = line.strip()
         if not line or line.isdigit():
             continue
-        # Strip leading number/bullet
         line = re.sub(r"^[\d.)\-\*•\s]+", "", line).strip()
         line = line.strip('"').strip("'").strip()
         if line:
             items.append(line)
-    if not items:
-        for part in text.split(","):
-            part = part.strip().strip('"').strip("'").strip()
-            if part and not part.isdigit():
-                items.append(part)
 
     return items
 
-
 def generate_variants(keywords, location, language, model):
-    """Use Ollama to generate location and search term variations in multiple languages."""
+    """Use Ollama to translate keywords into English and the target language."""
+    kw_list = [k.strip() for k in keywords.split(",") if k.strip()]
+    if not kw_list:
+        kw_list = [keywords.strip()]
 
-    # --- Location variants ---
+    # ── Generate location variants (keep as is - working well) ──
     loc_prompt = (
-        f"Generate exactly 20 location string variations for job search engines.\n"
+        f"Generate exactly 12 location string variations for job search engines.\n"
         f"Original location: \"{location}\"\n"
         f"Generate variations in BOTH {language} AND English.\n\n"
-        f"Include all of these formats:\n"
-        f'- City only (both languages): "München", "Munich"\n'
-        f'- City + country: "München, Germany", "Munich, Germany"\n'
-        f'- City + state/region (both languages): "München, Bayern", "Munich, Bavaria"\n'
-        f'- City + state + country: "Munich, Bavaria, Germany"\n'
-        f'- With dashes: "München-Germany", "Munich-Germany"\n'
-        f'- With "near": "near Munich", "near München"\n'
-        f'- Common abbreviations and local spellings\n'
-        f'- Umlaut and non-umlaut versions\n\n'
-        f"Return ONLY a JSON array of strings. No explanation, no markdown, no numbering.\n"
-        f'Example: ["München", "Munich", "München, Germany", "Munich, Germany", ...]'
+        f"Use ONLY these formats:\n"
+        f"- city\n"
+        f"- city, federal state\n"
+        f"- city, country\n"
+        f"- city, federalstate, country\n"
+        f"- country, city\n"
+        f"Do NOT use markdown code blocks. Return a RAW JSON array only, no formatting.\n"
     )
     loc_text = ollama_chat_text(
-        "You are a job search localization expert. Output ONLY valid JSON arrays.",
+        "You are a job search expert. Output ONLY valid JSON arrays.",
         loc_prompt, model, timeout=30
     )
     loc_variants = _parse_variant_list(loc_text) if loc_text else []
 
-    # --- Search term variants ---
+    # ── Generate simple translated term variants (NO combinations, NO OR/AND) ──
+    keywords_str = ", ".join(kw_list)
+    
     term_prompt = (
-        f"Generate exactly 20 search keyword variations for job search engines.\n"
-        f"Original keywords: \"{keywords}\"\n"
-        f"Generate variations in BOTH {language} AND English.\n\n"
-        f"Include all of these:\n"
-        f"- Exact keywords as-is\n"
-        f'- Common misspellings: "analyst" → also "analist", "scientist" → "scientis"\n'
-        f"- Translations to {language} (if different from English)\n"
-        f"- Related/adjacent job titles: broader and narrower roles\n"
-        f'- Combined with OR: "data scientist OR data analyst"\n'
-        f'- Abbreviated forms\n'
-        f"- Compound variations\n\n"
-        f"Do NOT include employment type prefixes like \"Werkstudent\" or \"working student\" "
-        f"or \"Praktikum\" — those are handled separately by the system.\n\n"
-        f"Return ONLY a JSON array of strings. No explanation, no markdown, no numbering.\n"
-        f'Example: ["Data Scientist", "Datenwissenschaftler", "Data Analyst", ...]'
+        f"You are a job search translator.\n\n"
+        f"Input keywords: {keywords_str}\n"
+        f"Target language: {language}\n\n"
+        f"TASK: For EACH keyword, provide:\n"
+        f"1. The exact original keyword\n"
+        f"2. English translation (if not already English)\n"
+        f"3. {language} translation (if {language} is not English)\n\n"
+        f"STRICT RULES:\n"
+        f"- Output ONLY a JSON array of plain strings\n"
+        f"- NO duplicates whatsoever\n"
+        f"- NO combinations with OR, AND, or any operator\n"
+        f"- NO prefixes like Werkstudent, Praktikum, working student, intern\n"
+        f"- NO quotes, brackets, or extra formatting inside strings\n"
+        f"- Each string must be ONE single job title, nothing more\n"
+        f"- NO markdown code blocks\n"
     )
+    
     term_text = ollama_chat_text(
-        "You are a job search expert. Output ONLY valid JSON arrays.",
+        "You output ONLY valid JSON arrays. No duplicates. No OR/AND. Single job titles only.",
         term_prompt, model, timeout=30
     )
-    term_variants = _parse_variant_list(term_text) if term_text else []
+    
+    # Parse and aggressively clean
+    raw_variants = _parse_variant_list(term_text) if term_text else []
+    
+    term_variants = []
+    seen = set()
+    for term in raw_variants:
+        term = term.strip()
+        # Skip empty
+        if not term:
+            continue
+        # Skip any OR/AND combinations
+        if re.search(r'\bOR\b|\bAND\b', term, re.IGNORECASE):
+            continue
+        # Skip if has prefixes we don't want
+        if re.search(r'^(werkstudent|working\s+student|praktikum|intern|hiwi)\s*', term, re.IGNORECASE):
+            continue
+        # Deduplicate case-insensitively
+        term_lower = term.lower()
+        if term_lower in seen:
+            continue
+        seen.add(term_lower)
+        term_variants.append(term)
 
     # Fallbacks if AI failed
     if not loc_variants:
@@ -417,8 +427,8 @@ def generate_variants(keywords, location, language, model):
         term_variants = _fallback_term_variants(keywords)
 
     return {
-        "location_variants": loc_variants[:20],
-        "search_variants": term_variants[:20],
+        "location_variants": loc_variants[:14],
+        "search_variants": term_variants[:14],
     }
 
 
@@ -451,15 +461,9 @@ def _fallback_loc_variants(loc):
 
 
 def _fallback_term_variants(kw):
-    """Simple hardcoded fallback if AI variant generation fails."""
+    """Simple fallback - just return the original keyword, no combinations."""
     kw = kw.strip()
-    return [
-        kw,
-        f"Werkstudent {kw}",
-        f"working student {kw}",
-        f'"working student" ({kw})',
-        kw.replace(" ", " OR "),
-    ]
+    return [kw]
 
 
 # ─── Skills Persistence ──────────────────────────────────────────────────────
@@ -575,31 +579,77 @@ def _is_transient(exc):
 
 
 def _resolve_site(site, loc_vars, term_vars, hours_old, country="Germany"):
-    """Try ALL combinations of location × search_term. Return (df, status_str)."""
-    results = []
-    for loc in loc_vars:
-        for term in term_vars:
-            attempt = 0
-            while True:
-                try:
-                    df = scrape_jobs(
-                        site_name=[site], search_term=term, location=loc,
-                        results_wanted=10000, hours_old=hours_old,
-                        country_indeed=country, linkedin_fetch_description=True,
-                        proxies=None, verbose=0,
-                    )
-                except Exception as e:
-                    if _is_transient(e) and attempt < 1:
-                        attempt += 1
-                        time.sleep(3)
-                        continue
-                    # Continue trying other combinations instead of giving up
+    """LinkedIn: first-winner only (fast). Glassdoor/Indeed: all working combos (more results)."""
+    cancel_event = threading.Event()
+    working_pairs = []
+
+    def _probe(loc, term):
+        """Fast probe: no description, small request. Returns (loc, term, df) or None."""
+        if cancel_event.is_set():
+            return None
+        try:
+            df = scrape_jobs(
+                site_name=[site], search_term=term, location=loc,
+                results_wanted=15, hours_old=hours_old,
+                country_indeed=country, linkedin_fetch_description=False,
+                proxies=None, verbose=0,
+            )
+            if df is not None and not df.empty:
+                return (loc, term, df)
+        except Exception:
+            pass
+        return None
+
+    # Phase 1: Parallel probe
+    is_linkedin = site.lower() == "linkedin"
+    
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = {
+            ex.submit(_probe, loc, term): (loc, term)
+            for loc in loc_vars for term in term_vars
+        }
+        for f in as_completed(futures):
+            result = f.result()
+            if result is not None:
+                working_pairs.append(result)
+                # LinkedIn: stop at first winner
+                if is_linkedin:
+                    cancel_event.set()
                     break
-                if df is not None and not df.empty:
-                    results.append(df)
+
+    if not working_pairs:
+        return pd.DataFrame(), "no results"
+
+    # Phase 2: Full scrape
+    results = []
+    
+    for loc, term, probe_df in working_pairs:
+        attempt = 0
+        full_df = pd.DataFrame()
+        while True:
+            try:
+                full_df = scrape_jobs(
+                    site_name=[site], search_term=term, location=loc,
+                    results_wanted=10000, hours_old=hours_old,
+                    country_indeed=country, linkedin_fetch_description=True,
+                    proxies=None, verbose=0,
+                )
+            except Exception as e:
+                if _is_transient(e) and attempt < 1:
+                    attempt += 1
+                    time.sleep(3)
+                    continue
+                break
+            break
+
+        if full_df is not None and not full_df.empty:
+            results.append(full_df)
+        elif probe_df is not None and not probe_df.empty:
+            # Full scrape failed but probe worked — keep probe data
+            results.append(probe_df)
+
     if results:
         combined = pd.concat(results, ignore_index=True)
-        # Deduplicate within this site
         if "title" in combined.columns and "company" in combined.columns:
             combined["_tk"] = combined["title"].str.strip().str.lower()
             combined["_ck"] = combined["company"].str.strip().str.lower()
@@ -645,30 +695,41 @@ def run_scrape(params):
         state["scrape_duplicates"] = 0
         state["scraped_df"] = None
 
-    all_dfs = []
-
-    for site in sites:
+    def _scrape_one_site(site):
+        """Run one site in its own thread. Returns a DataFrame."""
         with lock:
             state["scrape_site_status"][site] = "running"
-            state["scrape_progress"] = f"Scraping {site} ({len(loc_vars)}×{len(term_vars)} variants)..."
-        df, status = _resolve_site(site, loc_vars, term_vars, hours_old)
-        with lock:
-            state["scrape_site_status"][site] = status
-            if not df.empty:
-                all_dfs.append(df)
+            state["scrape_progress"] = f"Scraping {site}..."
+        try:
+            if site == "google":
+                df, status = _resolve_google(google_query)
+            else:
+                df, status = _resolve_site(site, loc_vars, term_vars, hours_old)
+            with lock:
+                state["scrape_site_status"][site] = status
+            return df
+        except Exception as e:
+            with lock:
+                state["scrape_site_status"][site] = f"error: {e}"
+            return pd.DataFrame()
 
+    # Build task list: all sites + optionally google
+    tasks = list(sites)
     if google_query:
-        with lock:
-            state["scrape_site_status"]["google"] = "running"
-            state["scrape_progress"] = "Scraping Google..."
-        gdf, gstatus = _resolve_google(google_query)
-        with lock:
-            state["scrape_site_status"]["google"] = gstatus
-            if not gdf.empty:
-                all_dfs.append(gdf)
+        tasks.append("google")
 
-    if all_dfs:
-        jobs = pd.concat(all_dfs, ignore_index=True)
+    # Run ALL sites in parallel
+    site_dfs = []
+    with ThreadPoolExecutor(max_workers=len(tasks)) as ex:
+        futures = {ex.submit(_scrape_one_site, site): site for site in tasks}
+        for f in as_completed(futures):
+            df = f.result()
+            if df is not None and not df.empty:
+                site_dfs.append(df)
+
+    # Combine all results
+    if site_dfs:
+        jobs = pd.concat(site_dfs, ignore_index=True)
         raw_count = len(jobs)
         if "description" not in jobs.columns:
             jobs["description"] = np.nan

@@ -16,4 +16,8 @@ venv/**
 *.json
 *.sqlite3
 
+#Programm Runntimes
 *runtimes2.txt
+
+#Outputs
+results/**
