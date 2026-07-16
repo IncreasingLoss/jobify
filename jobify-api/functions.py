@@ -113,6 +113,11 @@ SKILLS_APPEND = (
     '{"is_right_jobtype":"yes" or "no","skills_matching":integer}'
 )
 
+COMPANY_APPEND = (
+    "\nIf the 'Company' field is missing, empty, or just says '?', "
+    "try to extract the hiring company's name from the 'Title' or 'Description' and include it as "
+    '"company_name": "Extracted Name" in the JSON response. If you cannot determine it, omit the key.'
+)
 
 # ─── VRAM & Worker Calculation ───────────────────────────────────────────────
 
@@ -770,6 +775,11 @@ def _classify_one(title, company, job_type, description, skills_text, model, tar
     system_prompt = TYPE_PROMPTS[target_type]
     if skills_text:
         system_prompt += SKILLS_APPEND
+        
+    needs_company = not company or str(company).strip().lower() in ('', '?', '(?)', 'none', 'nan', 'null')
+    if needs_company:
+        system_prompt += COMPANY_APPEND
+        
     user_prompt = (
         f"Title: {title or '(?)'}\n"
         f"Company: {company or '(?)'}\n"
@@ -780,16 +790,22 @@ def _classify_one(title, company, job_type, description, skills_text, model, tar
         user_prompt = f"Candidate skills:\n{skills_text}\n\nJob posting:\n{user_prompt}"
     r = ollama_chat(system_prompt, user_prompt, model, timeout=90)
     if not r["ok"]:
-        return {"is_right_jobtype": None, "skills_matching": None}
+        return {"is_right_jobtype": None, "skills_matching": None, "extracted_company": None}
     d = r["data"]
     sm = d.get("skills_matching")
     try:
         sm = max(0, min(100, int(float(sm)))) if sm is not None else None
     except (TypeError, ValueError):
         sm = None
+        
+    extracted_company = None
+    if needs_company:
+        extracted_company = d.get("company_name")
+        
     return {
         "is_right_jobtype": _norm_yes_no(d.get("is_right_jobtype")),
         "skills_matching": sm,
+        "extracted_company": extracted_company,
     }
 
 
@@ -857,6 +873,10 @@ def run_classify(params):
     df["is_right_jobtype"] = [r["is_right_jobtype"] for r in results]
     if used_skills:
         df["skills_matching"] = [r["skills_matching"] for r in results]
+    # Apply AI-extracted company names if original was empty
+    for idx, r in zip(df.index, results):
+        if r.get("extracted_company"):
+            df.at[idx, "company"] = r["extracted_company"]
     n_yes = (df["is_right_jobtype"] == "yes").sum()
     n_no = (df["is_right_jobtype"] == "no").sum()
     n_err = df["is_right_jobtype"].isna().sum()

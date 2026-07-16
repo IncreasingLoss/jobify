@@ -89,6 +89,10 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 <option value="Portuguese">Portuguese</option>
 </select>
 </div>
+<div class="w-full sm:w-36">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1 flex justify-between"><span>Days old</span><span id="days-val" class="text-orange-400 normal-case">10d</span></label>
+<input id="rng-days" type="range" min="1" max="180" value="10" step="1" oninput="document.getElementById('days-val').textContent=this.value+'d'" class="w-full">
+</div>
 <div class="flex items-end">
 <button id="btn-scrape" onclick="startScrape()"
   class="w-full sm:w-auto bg-orange-500 hover:bg-orange-400 active:bg-orange-600 text-black font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2 whitespace-nowrap">
@@ -107,10 +111,6 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" id="chk-in" checked class="accent-orange-500 w-3.5 h-3.5"> Indeed</label>
 <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" id="chk-li" checked class="accent-orange-500 w-3.5 h-3.5"> LinkedIn</label>
 </div>
-</div>
-<div>
-<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 block">Hours old</label>
-<input id="inp-hours" type="number" value="240" class="w-20 bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-orange-500/50 transition">
 </div>
 <div>
 <label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 block">Or load CSV</label>
@@ -221,9 +221,9 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 <thead class="bg-zinc-800/60 sticky top-0 z-10">
 <tr class="text-left text-[11px] text-zinc-500 uppercase tracking-wider">
 <th class="px-3 py-2 w-6"></th>
-<th class="px-3 py-2 font-medium">Skill</th>
-<th class="px-3 py-2 font-medium w-44">Level</th>
-<th class="px-3 py-2 font-medium w-36">Area</th>
+<th class="px-3 py-2 font-medium w-[40%]">Skill</th>
+<th class="px-3 py-2 font-medium w-[40%]">Level</th>
+<th class="px-3 py-2 font-medium w-[20%]">Area</th>
 <th class="px-3 py-2 w-8"></th>
 </tr>
 </thead>
@@ -299,9 +299,9 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 <input id="chk-match" type="checkbox" checked onchange="applyFilter()" class="accent-orange-500 w-3.5 h-3.5">
 Only matching skills
 </label>
-<label class="flex items-center gap-2 text-sm text-zinc-500 pb-1 cursor-pointer select-none">
-<input id="chk-rejected" type="checkbox" onchange="applyFilter()" class="accent-zinc-500 w-3.5 h-3.5">
-Show rejected
+<label id="jobtype-chk-wrap" class="flex items-center gap-2 text-sm text-zinc-400 pb-1 cursor-pointer select-none">
+<input id="chk-jobtype" type="checkbox" checked onchange="applyFilter()" class="accent-orange-500 w-3.5 h-3.5">
+Only match jobtype
 </label>
 </div>
 
@@ -437,7 +437,6 @@ async function startScrape(){
   $('scrape-tbl-wrap').classList.add('hidden');$('scrape-pages').classList.add('hidden');$('scrape-empty').classList.add('hidden');
   $('scrape-prog-bar').style.width='5%';$('scrape-prog-txt').textContent='Asking AI to generate search variants…';
 
-  // Step 1: Generate variants via AI
   let locVars=null, termVars=null;
   try{
     const r=await fetch('/api/generate-variants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keywords:kw,location:loc,language:$('sel-lang').value,model:$('sel-model').value})});
@@ -445,7 +444,6 @@ async function startScrape(){
     if(d.location_variants&&d.search_variants){
       locVars=d.location_variants;termVars=d.search_variants;
       lastLocVariants=locVars;lastTermVariants=termVars;
-      // Show variants in advanced section
       $('variants-display').classList.remove('hidden');
       renderTags('loc-tags',locVars,15);renderTags('term-tags',termVars,15);
       $('variant-count').textContent=`${locVars.length} locations × ${termVars.length} terms = ${locVars.length*termVars.length} combinations`;
@@ -457,11 +455,12 @@ async function startScrape(){
     toast('AI variant error, using fallbacks: '+e.message,'error');
   }
 
-  // Step 2: Start scrape with variants
   btn.innerHTML='<i class="fa-solid fa-spinner fa-spin text-xs"></i> Searching…';
   $('scrape-prog-bar').style.width='10%';$('scrape-prog-txt').textContent='Starting scrape…';
   try{
-    await fetch('/api/scrape',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keywords:kw,location:loc,sites,hours_old:parseInt($('inp-hours').value)||240,google_query:$('inp-gquery').value.trim(),model:$('sel-model').value,location_variants:locVars,search_variants:termVars})});
+    // Convert days to hours (days * 24)
+    const hours_old = (parseInt($('rng-days').value) || 10) * 24;
+    await fetch('/api/scrape',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keywords:kw,location:loc,sites,hours_old:hours_old,google_query:$('inp-gquery').value.trim(),model:$('sel-model').value,location_variants:locVars,search_variants:termVars})});
     scrapePoll=setInterval(pollScrape,1500);
   }catch(e){toast('Error: '+e.message,'error');btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-magnifying-glass text-xs"></i> Search Jobs';}
 }
@@ -628,7 +627,7 @@ function renderClsRow(j){
 }
 
 async function applyFilter(){
-  const mm=$('rng-match').value,om=$('chk-match').checked,sr=$('chk-rejected').checked;
+  const mm=$('rng-match').value,om=$('chk-match').checked,sr=!$('chk-jobtype').checked;
   try{
     const r=await fetch(`/api/classify-data?page=1&per_page=${PER}&min_match=${mm}&only_matching=${om}&show_rejected=${sr}`),d=await r.json();
     const tb=$('cls-tbody');
@@ -639,7 +638,7 @@ async function applyFilter(){
 }
 
 async function loadClsData(page){
-  const mm=$('rng-match').value,om=$('chk-match').checked,sr=$('chk-rejected').checked;
+  const mm=$('rng-match').value,om=$('chk-match').checked,sr=!$('chk-jobtype').checked;
   try{
     const r=await fetch(`/api/classify-data?page=${page}&per_page=${PER}&min_match=${mm}&only_matching=${om}&show_rejected=${sr}`),d=await r.json();
     $('cls-tbody').innerHTML=d.data.map(renderClsRow).join('');
@@ -648,7 +647,7 @@ async function loadClsData(page){
 }
 
 function exportFinal(){
-  const mm=$('rng-match').value,om=$('chk-match').checked,sr=$('chk-rejected').checked;
+  const mm=$('rng-match').value,om=$('chk-match').checked,sr=!$('chk-jobtype').checked;
   window.open(`/api/export/final?min_match=${mm}&only_matching=${om}&show_rejected=${sr}`,'_blank');
 }
 

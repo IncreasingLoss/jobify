@@ -238,11 +238,12 @@ def classify_status():
 
 
 @app.get("/api/classify-data")
+@app.get("/api/classify-data")
 def classify_data(
     page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200),
     min_match: int = Query(0, ge=0, le=100),
-    only_matching: bool = Query(True), # Changed default to True (ticked by default)
-    show_rejected: bool = Query(False), # Ignored now, kept to prevent frontend errors
+    only_matching: bool = Query(True), 
+    show_rejected: bool = Query(False), 
 ):
     with lock:
         df = state["classified_df"]
@@ -250,14 +251,18 @@ def classify_data(
     if df is None or df.empty:
         return {"data": [], "total": 0, "page": 1, "pages": 0, "used_skills": False}
     
-    # FIX: ALWAYS filter to only matching job types (rejecteds are completely ignored)
-    filtered = df[df["is_right_jobtype"] == "yes"].copy()
+    filtered = df.copy()
     
+    # If show_rejected is False (checkbox IS checked), filter to only 'yes'
+    if not show_rejected:
+        filtered = filtered[filtered["is_right_jobtype"] == "yes"]
+        
     has_sm = "skills_matching" in filtered.columns
     if has_sm:
+        # If only_matching is True (checkbox IS checked), apply skills filter
         if only_matching:
             filtered = filtered[filtered["skills_matching"].notna()]
-        filtered = filtered[filtered["skills_matching"].fillna(-1) >= min_match]
+            filtered = filtered[filtered["skills_matching"].fillna(-1) >= min_match]
         
     # FIX: Enforce strict column order so frontend Object.values() matches table headers exactly
     strict_order = [
@@ -305,14 +310,16 @@ def export_final(
     if df is None or df.empty:
         return JSONResponse({"error": "No data"}, status_code=404)
     
-    # Force only matching job types
-    filtered = df[df["is_right_jobtype"] == "yes"].copy()
+    filtered = df.copy()
     
+    if not show_rejected:
+        filtered = filtered[filtered["is_right_jobtype"] == "yes"]
+        
     has_sm = "skills_matching" in filtered.columns
     if has_sm:
         if only_matching:
             filtered = filtered[filtered["skills_matching"].notna()]
-        filtered = filtered[filtered["skills_matching"].fillna(-1) >= min_match]
+            filtered = filtered[filtered["skills_matching"].fillna(-1) >= min_match]
     if has_sm and not filtered.empty:
         filtered = filtered.sort_values("skills_matching", ascending=False)
     if not used_skills and has_sm:
