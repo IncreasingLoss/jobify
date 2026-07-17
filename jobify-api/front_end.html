@@ -378,7 +378,7 @@ Only match jobtype
 <label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-2 block">CV / Resume</label>
 <label class="flex flex-col items-center justify-center h-24 border-2 border-dashed border-zinc-700/60 rounded-lg cursor-pointer hover:border-zinc-600 transition-colors" id="matcher-cv-drop">
 <i class="fa-solid fa-file-lines text-xl text-zinc-700 mb-1.5"></i>
-<span id="matcher-cv-name" class="text-xs text-zinc-600">Drop PDF/TXT or click to browse</span>
+<span id="matcher-cv-name" class="text-xs text-zinc-600">Drop PDF/TXT/DOCX or click to browse</span>
 <input type="file" id="matcher-cv-file" accept=".pdf,.txt,.md,.docx" onchange="matcherLoadCv()" class="hidden">
 </label>
 <div class="relative mt-2">
@@ -391,12 +391,12 @@ Only match jobtype
 <label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-2 block">Cover Letter Template</label>
 <label class="flex flex-col items-center justify-center h-24 border-2 border-dashed border-zinc-700/60 rounded-lg cursor-pointer hover:border-zinc-600 transition-colors" id="matcher-cl-drop">
 <i class="fa-solid fa-envelope-open-text text-xl text-zinc-700 mb-1.5"></i>
-<span id="matcher-cl-name" class="text-xs text-zinc-600">Drop PDF/TXT or click to browse</span>
+<span id="matcher-cl-name" class="text-xs text-zinc-600">Drop PDF/TXT/DOCX or click to browse</span>
 <input type="file" id="matcher-cl-file" accept=".pdf,.txt,.md,.docx" onchange="matcherLoadCl()" class="hidden">
 </label>
 <div class="relative mt-2">
 <span class="text-[10px] text-zinc-600 uppercase tracking-wider block mb-1">Or paste cover letter template</span>
-<textarea id="matcher-cl-text" rows="4" placeholder="Paste your cover letter template here. Use {{JOB_TITLE}}, {{COMPANY}} as placeholders…"
+<textarea id="matcher-cl-text" rows="4" placeholder="Paste your cover letter template here…"
   class="w-full bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/20 transition resize-y"></textarea>
 </div>
 </div>
@@ -428,6 +428,7 @@ Only match jobtype
 <div class="w-32">
 <label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 flex justify-between"><span>Workers</span><span id="m-wrk-val" class="text-zinc-400 normal-case">—</span></label>
 <input id="m-rng-wrk" type="range" min="1" max="30" value="6" oninput="document.getElementById('m-wrk-val').textContent=this.value" class="w-full">
+<p id="m-wrk-reason" class="text-[10px] text-zinc-700 mt-0.5 leading-snug truncate" title=""></p>
 </div>
 <div class="flex-1"></div>
 <button id="btn-matcher" onclick="startMatcher()" disabled
@@ -449,7 +450,7 @@ Only match jobtype
 <span class="text-emerald-400"><i class="fa-solid fa-check mr-1 text-xs"></i><span id="m-done">0</span> generated</span>
 <span class="text-red-400/80"><i class="fa-solid fa-xmark mr-1 text-xs"></i><span id="m-fail">0</span> failed</span>
 <div class="flex-1"></div>
-<button onclick="exportMatcherResults()" class="text-orange-400 hover:text-orange-300 text-sm flex items-center gap-1.5 transition-colors"><i class="fa-solid fa-download text-xs"></i> Export All</button>
+<button onclick="exportMatcherResults()" class="text-orange-400 hover:text-orange-300 text-sm flex items-center gap-1.5 transition-colors"><i class="fa-solid fa-download text-xs"></i> Download All</button>
 </div>
 
 <div id="matcher-results" class="hidden mt-4 space-y-3"></div>
@@ -471,6 +472,7 @@ const escA = s => s ? s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/
 const PER = 50;
 let skills = [], scrapePoll = null, clsPoll = null, matcherPoll = null, currentUsedSkills = false;
 let lastLocVariants = [], lastTermVariants = [];
+let maxVramWorkers = 6; // Updated by onModelChange()
 
 const TYPE_DESC = {
   working_student:'University enrollment required, 10-20h/week, flex schedule',
@@ -534,9 +536,12 @@ async function onModelChange(){
   try{
     const r=await fetch(`/api/auto-workers?model=${encodeURIComponent(model)}`),d=await r.json();
     const w=d.workers||1;$('rng-wrk').value=w;$('wrk-val').textContent=w;
+    maxVramWorkers = w; // Store for matcher section
     if(d.reason){$('wrk-reason').textContent=d.reason;$('wrk-reason').title=d.reason;}
     if(d.vram){$('wrk-reason').textContent=`${d.vram.total_mb>=1024?(d.vram.total_mb/1024).toFixed(1)+'GB':d.vram.total_mb+'MB'} GPU • ${d.reason}`;$('wrk-reason').title=d.reason;}
-  }catch(e){$('wrk-val').textContent='6';$('rng-wrk').value=6;}
+    // Update matcher workers too
+    updateMatcherWorkers();
+  }catch(e){$('wrk-val').textContent='6';$('rng-wrk').value=6;maxVramWorkers=6;}
 }
 
 async function genQuery(){
@@ -775,7 +780,6 @@ async function applyFilter(page){
     }
     $('cls-empty').classList.add('hidden');
   }catch(e){toast('Error loading classified data','error');}
-  // FIX: Load matcher jobs whenever filters change
   await loadMatcherJobs();
 }
 
@@ -787,8 +791,25 @@ function exportFinal(){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SECTION 3: APPLICATION MATCHER — ALL MISSING FUNCTIONS
+   SECTION 3: APPLICATION MATCHER
    ═══════════════════════════════════════════════════════════════════════════ */
+
+function updateMatcherWorkers(){
+  // Calculate workers based on: min(VRAM max, number of selected jobs)
+  const selected = document.querySelectorAll('.matcher-chk:checked').length;
+  const total = document.querySelectorAll('.matcher-chk').length;
+  let workers = maxVramWorkers;
+  if(selected > 0){
+    workers = Math.min(maxVramWorkers, selected);
+  } else if(total > 0){
+    workers = Math.min(maxVramWorkers, total);
+  }
+  workers = Math.max(1, workers);
+  $('m-rng-wrk').value = workers;
+  $('m-wrk-val').textContent = workers;
+  $('m-wrk-reason').textContent = `min(${maxVramWorkers} VRAM, ${selected || total} jobs) = ${workers}`;
+  $('m-wrk-reason').title = `VRAM allows ${maxVramWorkers} workers, but only ${selected || total} job(s) to process`;
+}
 
 async function loadMatcherJobs(){
   try{
@@ -843,6 +864,7 @@ function updateMatcherSelCount(){
   const checked = document.querySelectorAll('.matcher-chk:checked').length;
   $('matcher-sel-count').textContent = `${checked} selected`;
   $('btn-matcher').disabled = checked === 0;
+  updateMatcherWorkers();
 }
 
 function matcherSelectAll(){
@@ -865,7 +887,6 @@ async function matcherLoadCv(){
   $('matcher-cv-name').textContent = f.name;
   $('matcher-cv-name').classList.add('text-zinc-400');
   $('matcher-cv-name').classList.remove('text-zinc-600');
-  // If there's no pasted text, try to extract text from file for preview
   if(!$('matcher-cv-text').value.trim()){
     try{
       const fd = new FormData();
@@ -1005,24 +1026,29 @@ async function loadMatcherResults(){
 
     container.innerHTML = keys.map(jobId => {
       const res = results[jobId];
-      if(res.error){ fail++; return ''; }
+      if(res.error){ fail++; return `<div class="bg-red-500/5 border border-red-500/20 rounded-xl p-4"><div class="flex items-center gap-2 text-red-400"><i class="fa-solid fa-xmark text-xs"></i><span class="font-medium">${esc(res.title || 'Unknown')}</span></div><div class="text-xs text-red-400/60 mt-1">${esc(res.error)}</div></div>`; }
       done++;
 
       const hasCv = !!res.cv_text;
       const hasCl = !!res.cl_text;
 
+      // Build download buttons - separate CV and CL, no ZIP
+      let dlButtons = '';
+      if(hasCv){
+        dlButtons += `<a href="/api/match-download/${jobId}/cv" class="inline-flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 px-3 py-1.5 rounded-lg transition-colors"><i class="fa-solid fa-file-arrow-down text-[10px]"></i> Download CV</a>`;
+      }
+      if(hasCl){
+        dlButtons += `<a href="/api/match-download/${jobId}/cl" class="inline-flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 px-3 py-1.5 rounded-lg transition-colors"><i class="fa-solid fa-file-arrow-down text-[10px]"></i> Download CL</a>`;
+      }
+
       return `<div class="bg-zinc-800/30 border border-zinc-800/50 rounded-xl p-4">
-        <div class="flex items-center justify-between mb-3">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
           <div>
             <div class="font-medium text-zinc-200">${esc(res.title || 'Unknown')}</div>
             <div class="text-xs text-zinc-500">${esc(res.company || '')}</div>
           </div>
-          <div class="flex gap-2">
-            <a href="/api/match-download-zip/${jobId}" class="text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1 transition-colors">
-              <i class="fa-solid fa-download text-[10px]"></i> ZIP
-            </a>
-            ${hasCv ? `<a href="/api/match-download/${jobId}/cv" class="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 transition-colors">CV</a>` : ''}
-            ${hasCl ? `<a href="/api/match-download/${jobId}/cl" class="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 transition-colors">CL</a>` : ''}
+          <div class="flex flex-wrap gap-2">
+            ${dlButtons}
           </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1040,11 +1066,21 @@ async function loadMatcherResults(){
 }
 
 function exportMatcherResults(){
+  // Download all CVs and CLs individually (no ZIP)
   const selected = getSelectedMatcherIds();
   if(!selected.length) return toast('No jobs to export', 'error');
+  
+  let delay = 0;
   selected.forEach(id => {
-    window.open(`/api/match-download-zip/${id}`, '_blank');
+    setTimeout(() => {
+      window.open(`/api/match-download/${id}/cv`, '_blank');
+      setTimeout(() => {
+        window.open(`/api/match-download/${id}/cl`, '_blank');
+      }, 300);
+    }, delay);
+    delay += 700; // Stagger downloads to avoid browser blocking
   });
+  toast(`Downloading files for ${selected.length} jobs...`, 'info');
 }
 
 /* ── Init ── */
@@ -1052,6 +1088,7 @@ document.addEventListener('DOMContentLoaded', () => {
   checkOllama();
   autoLoadSkills();
   updateTargetDesc();
+  updateMatcherWorkers();
 });
 </script>
 </body>
