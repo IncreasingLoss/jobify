@@ -2,7 +2,8 @@
 Jobify — Core Functions
 Scraping, Ollama communication, classification logic, shared state.
 """
-
+import io
+from pathlib import Path
 import os, json, time, re, logging, threading, subprocess
 import urllib, urllib.request, urllib.error
 import pandas as pd
@@ -49,6 +50,11 @@ state = {
     "classify_target_type": None,
     "classify_used_skills": False,
     "classified_df": None,
+    "match_status": "idle",
+    "match_progress": "",
+    "match_current": 0,
+    "match_total": 0,
+    "match_results": {},
 }
 
 OLLAMA_BASE_URL = "http://localhost:11434"
@@ -892,3 +898,302 @@ def run_classify(params):
         state["classify_stats"] = {
             "matched": int(n_yes), "rejected": int(n_no), "error": int(n_err),
         }
+
+# ─── File Text Extraction ────────────────────────────────────────────────────
+
+def extract_text_from_file(filename, content_bytes):
+    """Extract plain text from common office file types.
+    Returns the text string or None if extraction fails.
+    Supported: .txt .docx .pdf .pptx .odt .rtf
+    """
+    ext = Path(filename).suffix.lower()
+    try:
+        if ext == ".txt":
+            return content_bytes.decode("utf-8", errors="replace")
+
+        elif ext == ".docx":
+            from docx import Document
+            doc = Document(io.BytesIO(content_bytes))
+            paras = [p.text for p in doc.paragraphs if p.text.strip()]
+            # Also grab text from tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        if cell.text.strip():
+                            paras.append(cell.text.strip())
+            return "\n".join(paras) if paras else None
+
+        elif ext == ".pdf":
+            text_parts = []
+            try:
+                import pdfplumber
+                with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
+                    for page in pdf.pages:
+                        t = page.extract_text()
+                        if t:
+                            text_parts.append(t)
+            except ImportError:
+                pass
+            if not text_parts:
+                try:
+                    from PyPDF2 import PdfReader
+                    reader = PdfReader(io.BytesIO(content_bytes))
+                    for page in reader.pages:
+                        t = page.extract_text()
+                        if t:
+                            text_parts.append(t)
+                except ImportError:
+                    pass
+            return "\n".join(text_parts) if text_parts else None
+
+        elif ext == ".pptx":
+            from pptx import Presentation
+            prs = Presentation(io.BytesIO(content_bytes))
+            text_parts = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        for para in shape.text_frame.paragraphs:
+                            if para.text.strip():
+                                text_parts.append(para.text.strip())
+            return "\n".join(text_parts) if text_parts else None
+
+        elif ext == ".odt":
+            try:
+                from odf.opendocument import load
+                from odf.text import P
+                doc = load(io.BytesIO(content_bytes))
+                text_parts = []
+                for para in doc.getElementsByType(P):
+                    if para.text.strip():
+                        text_parts.append(para.text.strip())
+                return "\n".join(text_parts) if text_parts else None
+            except ImportError:
+                return None
+
+        elif ext == ".rtf":
+            raw = content_bytes.decode("utf-8", errors="replace")
+            # Strip RTF control words
+            cleaned = re.sub(r"\\[a-z]+\d*[\s]?", "", raw)
+            cleaned = re.sub(r"[{}]", "", cleaned)
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+            return cleaned if len(cleaned) > 50 else None
+
+    except Exception:
+        pass
+    return None
+
+
+# ─── Document Rewriting via Ollama ───────────────────────────────────────────
+
+def _rewrite_document(doc_type, original_text, has_original,
+                      job_title, job_company, job_description,
+                      skills_text, language, model):
+    """Call Ollama to rewrite a CV or cover letter for a specific job.
+    doc_type: 'cv' or 'cl'
+    has_original: True  → small edits to existing text
+                    False → generate from scratch using skills profile only
+    Returns the rewritten text string, or None on failure.
+    """
+
+    desc_block = f"Description:\n{job_description[:6000]}"
+    skills_block = skills_text if skills_text else "(No skills profile provided)"
+
+    if has_original and original_text:
+        if doc_type == "cv":
+            sys_prompt = (
+                "You are a professional CV editor. Your ONLY task is to make minor wording "
+                "and emphasis adjustments to better align this CV with a specific job posting.\n\n"
+                "ABSOLUTE RULES — VIOLATION IS UNACCEPTABLE:\n"
+                "1. NEVER add any skill, technology, tool, or qualification that does NOT appear "
+                "in the original CV or the candidate's skills profile below.\n"
+                "2. NEVER fabricate work experience, projects, education, or certifications.\n"
+                "3. NEVER change dates, durations, or factual information.\n"
+                "4. NEVER invent metrics, achievements, or quantifiable results not in the original.\n"
+                "5. ONLY rephrase existing content to highlight relevance to the target job.\n"
+                "6. If the job requires a skill the candidate doesn't have, simply omit it — do NOT add it.\n"
+                "7. Preserve the overall structure and approximate length of the original CV.\n"
+                "8. Keep the same language style as the original unless instructed otherwise."
+            )
+            usr_prompt = (
+                f"Target job:\nTitle: {job_title}\nCompany: {job_company}\n{desc_block}\n\n"
+                f"Candidate's known skills:\n{skills_block}\n\n"
+                f"Original CV:\n{original_text[:8000]}\n\n"
+                f"Rewrite the CV in {language}. Make ONLY small, truthful adjustments to improve "
+                f"alignment with this job. Output the complete rewritten CV text only — no explanations, "
+                f"no markdown, no code fences."
+            )
+        else:
+            sys_prompt = (
+                "You are a professional cover letter editor. Tailor this cover letter for a "
+                "specific job posting.\n\n"
+                "ABSOLUTE RULES:\n"
+                "1. NEVER add skills or qualifications not mentioned in the original cover letter "
+                "or the candidate's skills profile below.\n"
+                "2. NEVER fabricate experiences or achievements.\n"
+                "3. Reference the specific company name and job title where appropriate.\n"
+                "4. Adjust tone and emphasis to match the job requirements.\n"
+                "5. Keep the same general length and structure.\n"
+                "6. Keep the same language style as the original unless instructed otherwise."
+            )
+            usr_prompt = (
+                f"Target job:\nTitle: {job_title}\nCompany: {job_company}\n{desc_block}\n\n"
+                f"Candidate's known skills:\n{skills_block}\n\n"
+                f"Original Cover Letter:\n{original_text[:6000]}\n\n"
+                f"Rewrite the cover letter in {language}. Output the complete rewritten cover "
+                f"letter text only — no explanations, no markdown, no code fences."
+            )
+    else:
+        # ── Generate from scratch ──
+        if doc_type == "cv":
+            sys_prompt = (
+                "You are a professional CV writer. Create a CV based ONLY on the candidate's "
+                "skills profile below.\n\n"
+                "RULES:\n"
+                "1. Use ONLY the skills and information provided — nothing else.\n"
+                "2. Do NOT invent additional skills, tools, qualifications, or experiences.\n"
+                "3. Create a clean, professional CV structure.\n"
+                "4. Be honest about skill levels — if a skill level is low, reflect that.\n"
+                "5. Do NOT use placeholder text like [Your Name], [Date], [Phone], etc. "
+                "Write complete, generic but realistic content."
+            )
+            usr_prompt = (
+                f"Candidate's skills:\n{skills_block}\n\n"
+                f"Target job:\nTitle: {job_title}\nCompany: {job_company}\n{desc_block}\n\n"
+                f"Write the CV in {language}. Output the complete CV text only — no explanations, "
+                f"no markdown, no code fences."
+            )
+        else:
+            sys_prompt = (
+                "You are a professional cover letter writer. Create a cover letter based ONLY on "
+                "the candidate's skills profile below.\n\n"
+                "RULES:\n"
+                "1. Use ONLY the skills and information provided — nothing else.\n"
+                "2. Do NOT invent additional skills or qualifications.\n"
+                "3. Reference the company and job title.\n"
+                "4. Keep it professional and concise.\n"
+                "5. Do NOT use placeholder text like [Your Name], [Date], etc."
+            )
+            usr_prompt = (
+                f"Candidate's skills:\n{skills_block}\n\n"
+                f"Target job:\nTitle: {job_title}\nCompany: {job_company}\n{desc_block}\n\n"
+                f"Write the cover letter in {language}. Output the complete cover letter text "
+                f"only — no explanations, no markdown, no code fences."
+            )
+
+    return ollama_chat_text(sys_prompt, usr_prompt, model, timeout=180)
+
+
+# ─── Run Match Jobs ──────────────────────────────────────────────────────────
+
+def run_match_jobs(job_indices, cv_text, cl_text, cv_ext, cl_ext,
+                   skills_list, language, model):
+    """Process selected jobs: rewrite CV + cover letter for each one."""
+
+    with lock:
+        classified_df = state["classified_df"]
+        scraped_df = state["scraped_df"]
+
+    if classified_df is None or classified_df.empty:
+        with lock:
+            state["match_status"] = "error"
+            state["match_progress"] = "No classified data. Run classification first."
+        return
+
+    skills_text = _fmt_skills(skills_list) if skills_list else None
+    has_cv = bool(cv_text and cv_text.strip())
+    has_cl = bool(cl_text and cl_text.strip())
+
+    if not has_cv and not has_cl:
+        with lock:
+            state["match_status"] = "error"
+            state["match_progress"] = "Provide at least a CV or cover letter."
+        return
+
+    total_tasks = len(job_indices) * (1 if has_cv else 0) + \
+                  len(job_indices) * (1 if has_cl else 0)
+    completed = [0]
+    results = {}
+
+    with lock:
+        state["match_status"] = "running"
+        state["match_current"] = 0
+        state["match_total"] = total_tasks
+        state["match_progress"] = f"Preparing 0/{total_tasks}..."
+        state["match_results"] = {}
+
+    def _safe_fname(base, ext):
+        safe = re.sub(r'[^a-zA-Z0-9_\-\s]', '', base).strip().replace(' ', '_')
+        return f"{safe[:80]}{ext}"
+
+    for idx in job_indices:
+        row = classified_df.iloc[idx]
+        title = str(row.get("title", "Unknown"))
+        company = str(row.get("company", "Unknown"))
+
+        # Full description from scraped_df if available
+        description = ""
+        if scraped_df is not None and not scraped_df.empty and idx < len(scraped_df):
+            dv = scraped_df.iloc[idx].get("description")
+            if pd.notna(dv):
+                description = str(dv)
+        if not description:
+            dv = row.get("description")
+            if pd.notna(dv):
+                description = str(dv)
+
+        job_id = str(int(idx))
+        result = {
+            "title": title,
+            "company": company,
+            "cv_text": None,
+            "cl_text": None,
+            "cv_ext": cv_ext or ".txt",
+            "cl_ext": cl_ext or ".txt",
+            "cv_filename": _safe_fname(f"CV_{company}_{title}", cv_ext or ".txt"),
+            "cl_filename": _safe_fname(f"CoverLetter_{company}_{title}", cl_ext or ".txt"),
+            "error": None,
+        }
+
+        try:
+            if has_cv:
+                result["cv_text"] = _rewrite_document(
+                    "cv", cv_text, True, title, company, description,
+                    skills_text, language, model,
+                ) or ""
+                with lock:
+                    completed[0] += 1
+                    state["match_current"] = completed[0]
+                    state["match_progress"] = (
+                        f"Processing {completed[0]}/{total_tasks} — "
+                        f"CV for: {title}"
+                    )
+
+            if has_cl:
+                result["cl_text"] = _rewrite_document(
+                    "cl", cl_text, True, title, company, description,
+                    skills_text, language, model,
+                ) or ""
+                with lock:
+                    completed[0] += 1
+                    state["match_current"] = completed[0]
+                    state["match_progress"] = (
+                        f"Processing {completed[0]}/{total_tasks} — "
+                        f"Cover Letter for: {title}"
+                    )
+
+        except Exception as e:
+            result["error"] = str(e)
+            with lock:
+                completed[0] += (1 if has_cv else 0) + (1 if has_cl else 0)
+                state["match_current"] = completed[0]
+
+        results[job_id] = result
+
+    with lock:
+        state["match_results"] = results
+        state["match_status"] = "done"
+        n_err = sum(1 for r in results.values() if r.get("error"))
+        state["match_progress"] = (
+            f"Done — {len(results)} jobs processed, {n_err} error(s)"
+        )

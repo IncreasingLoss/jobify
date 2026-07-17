@@ -3,24 +3,30 @@ Jobify — FastAPI Routes
 """
 
 import io
+import json  # ADD THIS
 import threading
 from pathlib import Path
+import re
+import zipfile
+from typing import Optional
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, File, Query, Request, UploadFile
+from fastapi import FastAPI, File, Query, Request, UploadFile, Form
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 import uvicorn
 
 from functions import (
     calculate_max_workers,
     check_ollama,
+    extract_text_from_file, 
     generate_google_query,
     generate_variants,
     load_skills_from_file,
     lock,
     parse_skills_csv_bytes,
     run_classify,
+    run_match_jobs, 
     run_scrape,
     save_skills_to_file,
     state,
@@ -237,7 +243,7 @@ def classify_status():
         }
 
 
-@app.get("/api/classify-data")
+
 @app.get("/api/classify-data")
 def classify_data(
     page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200),
@@ -253,18 +259,15 @@ def classify_data(
     
     filtered = df.copy()
     
-    # If show_rejected is False (checkbox IS checked), filter to only 'yes'
     if not show_rejected:
         filtered = filtered[filtered["is_right_jobtype"] == "yes"]
         
     has_sm = "skills_matching" in filtered.columns
-    if has_sm:
-        # If only_matching is True (checkbox IS checked), apply skills filter
-        if only_matching:
-            filtered = filtered[filtered["skills_matching"].notna()]
-            filtered = filtered[filtered["skills_matching"].fillna(-1) >= min_match]
-        
-    # FIX: Enforce strict column order so frontend Object.values() matches table headers exactly
+    if has_sm and only_matching:
+        # FIX: Same logic - keep None scores, only filter out low explicit scores
+        mask = filtered["skills_matching"].isna() | (filtered["skills_matching"].fillna(-1) >= min_match)
+        filtered = filtered[mask]
+    
     strict_order = [
         "title", "company", "skills_matching", "location", "date_posted", 
         "site", "job_url", "is_right_jobtype"
@@ -316,12 +319,14 @@ def export_final(
         filtered = filtered[filtered["is_right_jobtype"] == "yes"]
         
     has_sm = "skills_matching" in filtered.columns
-    if has_sm:
-        if only_matching:
-            filtered = filtered[filtered["skills_matching"].notna()]
-            filtered = filtered[filtered["skills_matching"].fillna(-1) >= min_match]
+    if has_sm and only_matching:
+        # FIX: Same logic
+        mask = filtered["skills_matching"].isna() | (filtered["skills_matching"].fillna(-1) >= min_match)
+        filtered = filtered[mask]
+    
     if has_sm and not filtered.empty:
-        filtered = filtered.sort_values("skills_matching", ascending=False)
+        filtered = filtered.copy()
+        filtered = filtered.sort_values("skills_matching", ascending=False, na_position="last")
     if not used_skills and has_sm:
         filtered = filtered.copy()
         filtered["skills_matching"] = filtered["skills_matching"].fillna("No skills — couldn't match")
@@ -330,6 +335,264 @@ def export_final(
     return Response(buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=jobs_final.csv"})
 
+
+# ─── Application Matcher ─────────────────────────────────────────────────────
+
+@app.get("/api/matcher-jobs")
+def matcher_jobs(
+    min_match: int = Query(0, ge=0, le=100),
+    only_matching: bool = Query(True),
+    show_rejected: bool = Query(False),
+):
+    """Return filtered classified jobs with row indices for the matcher."""
+    with lock:
+        df = state.get("classified_df")
+    if df is None or df.empty:
+        return {"data": [], "total": 0}
+
+    filtered = df.copy()
+    
+    # Filter out rejected jobs unless explicitly shown
+    if not show_rejected:
+        if "is_right_jobtype" in filtered.columns:
+            filtered = filtered[filtered["is_right_jobtype"] == "yes"]
+        else:
+            return {"data": [], "total": 0}  # No classification done yet
+    
+    # Apply skills filter
+    if "skills_matching" in filtered.columns and only_matching:
+        mask = filtered["skills_matching"].isna() | (filtered["skills_matching"].fillna(-1) >= min_match)
+        filtered = filtered[mask]
+
+    rows = []
+    for idx, row in filtered.iterrows():
+        r = {"_idx": int(idx)}
+        for c in ("title", "company", "skills_matching", "location", "site"):
+            if c in row.index:
+                v = row[c]
+                if pd.isna(v):
+                    r[c] = None
+                elif isinstance(v, (np.integer,)):
+                    r[c] = int(v)
+                elif isinstance(v, (np.floating,)):
+                    r[c] = float(v)
+                else:
+                    r[c] = str(v)
+        rows.append(r)
+    return {"data": rows, "total": len(rows)}
+
+
+@app.post("/api/match-jobs")
+async def match_jobs(
+    job_ids: str = Form(...),
+    cv_file: Optional[UploadFile] = File(default=None),
+    cv_text: Optional[str] = Form(default=None),
+    cl_file: Optional[UploadFile] = File(default=None),
+    cl_text: Optional[str] = Form(default=None),
+    language: str = Form("English"),
+    model: str = Form("qwen3:8b"),
+    skills: Optional[str] = Form(default=None),
+):
+    with lock:
+        if state["match_status"] == "running":
+            return JSONResponse({"error": "Matching already running"}, status_code=409)
+
+    try:
+        indices = [int(x) for x in json.loads(job_ids)]
+    except (json.JSONDecodeError, ValueError):
+        return JSONResponse({"error": "Invalid job_ids"}, status_code=400)
+
+    if not indices:
+        return JSONResponse({"error": "No jobs selected"}, status_code=400)
+
+    # ── Extract CV ──
+    cv_extracted = None
+    cv_ext = ".txt"
+    if cv_file and cv_file.filename:
+        cv_bytes = await cv_file.read()
+        cv_ext = Path(cv_file.filename).suffix.lower() or ".txt"
+        cv_extracted = extract_text_from_file(cv_file.filename, cv_bytes)
+        if not cv_extracted:
+            return JSONResponse(
+                {"error": f"Could not extract text from CV file: {cv_file.filename}"},
+                status_code=400,
+            )
+    if cv_text and cv_text.strip():
+        cv_extracted = cv_text.strip()
+
+    # ── Extract Cover Letter ──
+    cl_extracted = None
+    cl_ext = ".txt"
+    if cl_file and cl_file.filename:
+        cl_bytes = await cl_file.read()
+        cl_ext = Path(cl_file.filename).suffix.lower() or ".txt"
+        cl_extracted = extract_text_from_file(cl_file.filename, cl_bytes)
+        if not cl_extracted:
+            return JSONResponse(
+                {"error": f"Could not extract text from Cover Letter file: {cl_file.filename}"},
+                status_code=400,
+            )
+    if cl_text and cl_text.strip():
+        cl_extracted = cl_text.strip()
+
+    if not cv_extracted and not cl_extracted:
+        return JSONResponse(
+            {"error": "Provide at least a CV or cover letter (file or text)"},
+            status_code=400,
+        )
+
+    skills_list = None
+    if skills:
+        try:
+            skills_list = json.loads(skills)
+        except json.JSONDecodeError:
+            pass
+
+    threading.Thread(
+        target=run_match_jobs,
+        args=(indices, cv_extracted, cl_extracted, cv_ext, cl_ext,
+              skills_list, language, model),
+        daemon=True,
+    ).start()
+
+    n_tasks = len(indices) * (1 if cv_extracted else 0) + \
+              len(indices) * (1 if cl_extracted else 0)
+    return {"ok": True, "total_tasks": n_tasks}
+
+
+@app.get("/api/match-status")
+def match_status():
+    with lock:
+        return {
+            "status": state.get("match_status", "idle"),
+            "progress": state.get("match_progress", ""),
+            "current": state.get("match_current", 0),
+            "total": state.get("match_total", 0),
+        }
+
+
+@app.get("/api/match-results")
+def match_results():
+    with lock:
+        return {
+            "results": state.get("match_results", {}),
+            "status": state.get("match_status", "idle"),
+        }
+
+
+@app.get("/api/match-download-zip/{job_id}")
+def match_download_zip(job_id: str):
+    """Download CV + Cover Letter as a single ZIP for one job."""
+    with lock:
+        result = state["match_results"].get(job_id)
+    if not result:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+
+        def _add(text, ext, fname):
+            if not text:
+                return
+            # FIX: Cannot recreate PDF from text - convert to docx or txt
+            if ext == ".pdf":
+                ext = ".docx"
+                fname = fname.replace(".pdf", ".docx")
+            if ext == ".docx":
+                try:
+                    from docx import Document
+                    doc = Document()
+                    for line in text.split("\n"):
+                        doc.add_paragraph(line)
+                    d = io.BytesIO()
+                    doc.save(d)
+                    zf.writestr(fname, d.getvalue())
+                    return
+                except ImportError:
+                    ext = ".txt"
+                    fname = fname.replace(".docx", ".txt")
+            zf.writestr(fname, text.encode("utf-8"))
+
+        _add(result.get("cv_text"), result.get("cv_ext", ".txt"),
+             result.get("cv_filename", "CV.txt"))
+        _add(result.get("cl_text"), result.get("cl_ext", ".txt"),
+             result.get("cl_filename", "CoverLetter.txt"))
+
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", result.get("title", "application"))
+    return Response(
+        buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=application_{safe}.zip"},
+    )
+
+
+@app.get("/api/match-download/{job_id}/{doc_type}")
+def match_download_single(job_id: str, doc_type: str):
+    """Download a single document (cv or cl) for one job."""
+    with lock:
+        result = state["match_results"].get(job_id)
+    if not result:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+
+    if doc_type == "cv":
+        text = result.get("cv_text")
+        ext = result.get("cv_ext", ".txt")
+        fname = result.get("cv_filename", "CV.txt")
+    elif doc_type == "cl":
+        text = result.get("cl_text")
+        ext = result.get("cl_ext", ".txt")
+        fname = result.get("cl_filename", "CoverLetter.txt")
+    else:
+        return JSONResponse({"error": "Use 'cv' or 'cl'"}, status_code=400)
+
+    if not text:
+        return JSONResponse({"error": f"No {doc_type} for this job"}, status_code=404)
+
+    # FIX: Cannot recreate PDF from extracted text - convert to docx or txt
+    if ext == ".pdf":
+        ext = ".docx"
+        fname = fname.replace(".pdf", ".docx")
+
+    if ext == ".docx":
+        try:
+            from docx import Document
+            doc = Document()
+            for line in text.split("\n"):
+                doc.add_paragraph(line)
+            d = io.BytesIO()
+            doc.save(d)
+            return Response(
+                d.getvalue(),
+                media_type="application/vnd.openxmlformats-officedocument"
+                           ".wordprocessingml.document",
+                headers={"Content-Disposition": f"attachment; filename={fname}"},
+            )
+        except ImportError:
+            ext = ".txt"
+            fname = fname.replace(".docx", ".txt")
+
+    return Response(
+        text,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
+
+
+@app.post("/api/parse-matcher-file")
+async def parse_matcher_file(file: UploadFile = File(...)):
+    """Extract text from an uploaded file for preview in the matcher UI."""
+    try:
+        content = await file.read()
+        text = extract_text_from_file(file.filename, content)
+        if text:
+            return {"text": text, "filename": file.filename}
+        return JSONResponse(
+            {"error": f"Could not extract text from {file.filename}. "
+                      f"Supported: .txt .docx .pdf .pptx .odt .rtf"},
+            status_code=400,
+        )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 def _ser(df_slice):
     data = []
@@ -347,6 +610,7 @@ def _ser(df_slice):
                 r[c] = str(v)
         data.append(r)
     return data
+
 
 
 if __name__ == "__main__":

@@ -121,7 +121,6 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 </label>
 </div>
 </div>
-<!-- Generated variants display -->
 <div id="variants-display" class="hidden mt-4 pt-3 border-t border-zinc-800/50">
 <div class="flex items-center justify-between mb-2">
 <span class="text-[11px] text-zinc-500 uppercase tracking-wider">Generated variants</span>
@@ -329,6 +328,138 @@ Only match jobtype
 </div>
 </section>
 
+<!-- ═══════════ SECTION 3: APPLICATION MATCHER ═══════════ -->
+<section class="mb-16 fade-up">
+<div class="flex items-center gap-3 mb-5">
+<div class="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center"><i class="fa-solid fa-file-pen text-orange-400 text-sm"></i></div>
+<h2 class="font-heading text-xl font-semibold">Application Matcher</h2>
+</div>
+<div class="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 sm:p-6 backdrop-blur-sm">
+
+<p class="text-zinc-500 text-sm mb-5">Select jobs from your filtered results, provide your CV &amp; cover letter, and let the AI tailor each document per application.</p>
+
+<div class="mb-5">
+<div class="flex items-center gap-2 mb-3">
+<span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-500/15 text-orange-400 text-[10px] font-bold">1</span>
+<span class="text-[11px] text-zinc-500 uppercase tracking-wider font-medium">Job Selection</span>
+</div>
+<div class="bg-zinc-800/30 border border-zinc-800/50 rounded-xl p-4">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-2 block">Select jobs to apply for</label>
+<div class="flex gap-3 items-center mb-3">
+<button onclick="matcherSelectAll()" class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors px-2.5 py-1 rounded-md border border-zinc-800 hover:border-zinc-700">Select all</button>
+<button onclick="matcherDeselectAll()" class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors px-2.5 py-1 rounded-md border border-zinc-800 hover:border-zinc-700">Deselect all</button>
+<span id="matcher-sel-count" class="text-[11px] text-zinc-600 ml-auto">0 selected</span>
+</div>
+<div id="matcher-jobs-tbl-wrap" class="overflow-auto max-h-[220px] rounded-xl border border-zinc-800/60">
+<table class="w-full text-sm">
+<thead class="bg-zinc-800/60 sticky top-0 z-10">
+<tr class="text-left text-[11px] text-zinc-500 uppercase tracking-wider">
+<th class="px-3 py-2 w-8"></th>
+<th class="px-3 py-2 font-medium">Title</th>
+<th class="px-3 py-2 font-medium">Company</th>
+<th class="px-3 py-2 font-medium">Match</th>
+</tr>
+</thead>
+<tbody id="matcher-jobs-tbody" class="divide-y divide-zinc-800/40">
+<tr><td colspan="4" class="px-4 py-8 text-center text-zinc-700 text-xs">Classify jobs first, then select from filtered results</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+
+<div class="mb-5">
+<div class="flex items-center gap-2 mb-3">
+<span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-500/15 text-orange-400 text-[10px] font-bold">2</span>
+<span class="text-[11px] text-zinc-500 uppercase tracking-wider font-medium">Your Documents</span>
+</div>
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+<div class="bg-zinc-800/30 border border-zinc-800/50 rounded-xl p-4">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-2 block">CV / Resume</label>
+<label class="flex flex-col items-center justify-center h-24 border-2 border-dashed border-zinc-700/60 rounded-lg cursor-pointer hover:border-zinc-600 transition-colors" id="matcher-cv-drop">
+<i class="fa-solid fa-file-lines text-xl text-zinc-700 mb-1.5"></i>
+<span id="matcher-cv-name" class="text-xs text-zinc-600">Drop PDF/TXT or click to browse</span>
+<input type="file" id="matcher-cv-file" accept=".pdf,.txt,.md,.docx" onchange="matcherLoadCv()" class="hidden">
+</label>
+<div class="relative mt-2">
+<span class="text-[10px] text-zinc-600 uppercase tracking-wider block mb-1">Or paste CV text</span>
+<textarea id="matcher-cv-text" rows="4" placeholder="Paste your CV content here…"
+  class="w-full bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/20 transition resize-y"></textarea>
+</div>
+</div>
+<div class="bg-zinc-800/30 border border-zinc-800/50 rounded-xl p-4">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-2 block">Cover Letter Template</label>
+<label class="flex flex-col items-center justify-center h-24 border-2 border-dashed border-zinc-700/60 rounded-lg cursor-pointer hover:border-zinc-600 transition-colors" id="matcher-cl-drop">
+<i class="fa-solid fa-envelope-open-text text-xl text-zinc-700 mb-1.5"></i>
+<span id="matcher-cl-name" class="text-xs text-zinc-600">Drop PDF/TXT or click to browse</span>
+<input type="file" id="matcher-cl-file" accept=".pdf,.txt,.md,.docx" onchange="matcherLoadCl()" class="hidden">
+</label>
+<div class="relative mt-2">
+<span class="text-[10px] text-zinc-600 uppercase tracking-wider block mb-1">Or paste cover letter template</span>
+<textarea id="matcher-cl-text" rows="4" placeholder="Paste your cover letter template here. Use {{JOB_TITLE}}, {{COMPANY}} as placeholders…"
+  class="w-full bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/20 transition resize-y"></textarea>
+</div>
+</div>
+</div>
+</div>
+
+<div class="flex flex-wrap gap-x-4 gap-y-3 items-end pt-4 mt-4 border-t border-zinc-800/60">
+<div class="min-w-[160px]">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 block">Tone</label>
+<select id="matcher-tone"
+  class="w-full bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-orange-500/50 transition">
+<option value="professional" selected>Professional</option>
+<option value="casual">Casual</option>
+<option value="enthusiastic">Enthusiastic</option>
+<option value="formal">Formal</option>
+</select>
+</div>
+<div class="min-w-[160px]">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 block">Language</label>
+<select id="matcher-lang"
+  class="w-full bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-orange-500/50 transition">
+<option value="auto" selected>Auto-detect</option>
+<option value="en">English</option>
+<option value="de">German</option>
+<option value="fr">French</option>
+<option value="es">Spanish</option>
+</select>
+</div>
+<div class="w-32">
+<label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 flex justify-between"><span>Workers</span><span id="m-wrk-val" class="text-zinc-400 normal-case">—</span></label>
+<input id="m-rng-wrk" type="range" min="1" max="30" value="6" oninput="document.getElementById('m-wrk-val').textContent=this.value" class="w-full">
+</div>
+<div class="flex-1"></div>
+<button id="btn-matcher" onclick="startMatcher()" disabled
+  class="bg-orange-500 hover:bg-orange-400 active:bg-orange-600 text-black font-semibold px-6 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+<i class="fa-solid fa-file-pen text-xs"></i> Generate Applications
+</button>
+</div>
+
+<div id="matcher-prog" class="hidden mt-4">
+<div class="flex justify-between text-[11px] text-zinc-500 mb-1.5">
+<span id="matcher-prog-txt">Starting…</span><span id="matcher-prog-pct">0%</span>
+</div>
+<div class="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+<div id="matcher-prog-bar" class="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all duration-300 ease-out" style="width:0%"></div>
+</div>
+</div>
+
+<div id="matcher-stats" class="hidden mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm py-3 px-4 rounded-lg bg-zinc-800/30 border border-zinc-800/50">
+<span class="text-emerald-400"><i class="fa-solid fa-check mr-1 text-xs"></i><span id="m-done">0</span> generated</span>
+<span class="text-red-400/80"><i class="fa-solid fa-xmark mr-1 text-xs"></i><span id="m-fail">0</span> failed</span>
+<div class="flex-1"></div>
+<button onclick="exportMatcherResults()" class="text-orange-400 hover:text-orange-300 text-sm flex items-center gap-1.5 transition-colors"><i class="fa-solid fa-download text-xs"></i> Export All</button>
+</div>
+
+<div id="matcher-results" class="hidden mt-4 space-y-3"></div>
+<div id="matcher-empty" class="text-center py-16 text-zinc-700">
+<i class="fa-solid fa-file-pen text-3xl mb-3 block opacity-50"></i>
+<p class="text-sm">Select jobs and provide documents to generate tailored applications.</p>
+</div>
+
+</div>
+</section>
 </div>
 
 <div id="toasts" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none"></div>
@@ -338,7 +469,7 @@ const $ = id => document.getElementById(id);
 const esc = s => { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML };
 const escA = s => s ? s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
 const PER = 50;
-let skills = [], scrapePoll = null, clsPoll = null, currentUsedSkills = false;
+let skills = [], scrapePoll = null, clsPoll = null, matcherPoll = null, currentUsedSkills = false;
 let lastLocVariants = [], lastTermVariants = [];
 
 const TYPE_DESC = {
@@ -458,7 +589,6 @@ async function startScrape(){
   btn.innerHTML='<i class="fa-solid fa-spinner fa-spin text-xs"></i> Searching…';
   $('scrape-prog-bar').style.width='10%';$('scrape-prog-txt').textContent='Starting scrape…';
   try{
-    // Convert days to hours (days * 24)
     const hours_old = (parseInt($('rng-days').value) || 10) * 24;
     await fetch('/api/scrape',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keywords:kw,location:loc,sites,hours_old:hours_old,google_query:$('inp-gquery').value.trim(),model:$('sel-model').value,location_variants:locVars,search_variants:termVars})});
     scrapePoll=setInterval(pollScrape,1500);
@@ -626,32 +756,303 @@ function renderClsRow(j){
   return `<tr class="hover:bg-zinc-800/20 transition-colors ${!isMatch?'opacity-60':''}"><td class="px-4 py-2.5 max-w-[280px]"><div class="truncate font-medium text-zinc-200" title="${escA(j.description||'')}">${esc(j.title||'')}</div></td><td class="px-4 py-2.5 text-zinc-400 max-w-[130px] truncate">${esc(j.company||'')}</td><td class="px-4 py-2.5">${matchBadge}</td><td class="px-4 py-2.5"><div class="flex items-center">${smHtml}</div></td><td class="px-4 py-2.5 text-zinc-500 text-xs whitespace-nowrap">${esc(j.location||'')}</td><td class="px-4 py-2.5 text-center">${j.job_url?`<a href="${escA(j.job_url)}" target="_blank" rel="noopener" class="text-orange-400/70 hover:text-orange-400 transition-colors"><i class="fa-solid fa-arrow-up-right-from-square text-xs"></i></a>`:''}</td></tr>`;
 }
 
-async function applyFilter(){
-  const mm=$('rng-match').value,om=$('chk-match').checked,sr=!$('chk-jobtype').checked;
+async function applyFilter(page){
+  page = page || 1;
+  const minMatch = parseInt($('rng-match').value) || 0;
+  const onlyMatching = $('chk-match').checked;
+  const showRejected = !$('chk-jobtype').checked;
   try{
-    const r=await fetch(`/api/classify-data?page=1&per_page=${PER}&min_match=${mm}&only_matching=${om}&show_rejected=${sr}`),d=await r.json();
+    const r=await fetch(`/api/classify-data?page=${page}&per_page=${PER}&min_match=${minMatch}&only_matching=${onlyMatching}&show_rejected=${showRejected}`);
+    const d=await r.json();
     const tb=$('cls-tbody');
-    if(!d.data.length){tb.innerHTML='<tr><td colspan="6" class="px-4 py-10 text-center text-zinc-600">No jobs match the current filters</td></tr>';$('cls-tbl-wrap').classList.remove('hidden');$('cls-pages').classList.add('hidden');return;}
-    tb.innerHTML=d.data.map(renderClsRow).join('');$('cls-tbl-wrap').classList.remove('hidden');
-    pagination('cls-pages',d.page,d.pages,loadClsData);
-  }catch(e){}
-}
-
-async function loadClsData(page){
-  const mm=$('rng-match').value,om=$('chk-match').checked,sr=!$('chk-jobtype').checked;
-  try{
-    const r=await fetch(`/api/classify-data?page=${page}&per_page=${PER}&min_match=${mm}&only_matching=${om}&show_rejected=${sr}`),d=await r.json();
-    $('cls-tbody').innerHTML=d.data.map(renderClsRow).join('');
-    pagination('cls-pages',d.page,d.pages,loadClsData);
-  }catch(e){}
+    if(!d.data.length){
+      tb.innerHTML='<tr><td colspan="6" class="px-4 py-10 text-center text-zinc-600">No jobs match the current filters</td></tr>';
+      $('cls-tbl-wrap').classList.remove('hidden');$('cls-pages').classList.add('hidden');
+    }else{
+      tb.innerHTML=d.data.map(renderClsRow).join('');
+      $('cls-tbl-wrap').classList.remove('hidden');
+      pagination('cls-pages',d.page,d.pages,applyFilter);
+    }
+    $('cls-empty').classList.add('hidden');
+  }catch(e){toast('Error loading classified data','error');}
+  // FIX: Load matcher jobs whenever filters change
+  await loadMatcherJobs();
 }
 
 function exportFinal(){
-  const mm=$('rng-match').value,om=$('chk-match').checked,sr=!$('chk-jobtype').checked;
-  window.open(`/api/export/final?min_match=${mm}&only_matching=${om}&show_rejected=${sr}`,'_blank');
+  const minMatch = parseInt($('rng-match').value) || 0;
+  const onlyMatching = $('chk-match').checked;
+  const showRejected = !$('chk-jobtype').checked;
+  window.open(`/api/export/final?min_match=${minMatch}&only_matching=${onlyMatching}&show_rejected=${showRejected}`,'_blank');
 }
 
-document.addEventListener('DOMContentLoaded',()=>{updateTargetDesc();checkOllama().then(()=>autoLoadSkills());});
+/* ═══════════════════════════════════════════════════════════════════════════
+   SECTION 3: APPLICATION MATCHER — ALL MISSING FUNCTIONS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+async function loadMatcherJobs(){
+  try{
+    const minMatch = parseInt($('rng-match')?.value) || 0;
+    const onlyMatching = $('chk-match')?.checked ?? true;
+    const showRejected = !($('chk-jobtype')?.checked ?? true);
+
+    const params = new URLSearchParams({
+      min_match: minMatch,
+      only_matching: onlyMatching,
+      show_rejected: showRejected,
+    });
+
+    const r = await fetch(`/api/matcher-jobs?${params}`);
+    const d = await r.json();
+
+    const tb = $('matcher-jobs-tbody');
+    if(!tb) return;
+
+    if(!d.data || !d.data.length){
+      tb.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-zinc-700 text-xs">No jobs match the current filters</td></tr>';
+      $('matcher-sel-count').textContent = '0 selected';
+      $('btn-matcher').disabled = true;
+      return;
+    }
+
+    tb.innerHTML = d.data.map(j => {
+      const sm = j.skills_matching;
+      let smHtml;
+      if(sm === null || sm === undefined){
+        smHtml = '<span class="text-xs text-zinc-600">—</span>';
+      } else {
+        const clr = sm >= 70 ? 'bg-emerald-500' : sm >= 40 ? 'bg-amber-500' : 'bg-red-500';
+        const tc = sm >= 70 ? 'text-emerald-400' : sm >= 40 ? 'text-amber-400' : 'text-red-400';
+        smHtml = `<div class="match-bar"><div class="match-fill ${clr}" style="width:${sm}%"></div></div><span class="text-xs ${tc}">${sm}%</span>`;
+      }
+      return `<tr class="hover:bg-zinc-800/20 transition-colors">
+        <td class="px-3 py-2"><input type="checkbox" class="matcher-chk accent-orange-500 w-3.5 h-3.5 cursor-pointer" data-idx="${j._idx}" onchange="updateMatcherSelCount()"></td>
+        <td class="px-3 py-2 max-w-[260px] truncate font-medium text-zinc-200" title="${escA(j.title)}">${esc(j.title || '')}</td>
+        <td class="px-3 py-2 text-zinc-400 max-w-[120px] truncate">${esc(j.company || '')}</td>
+        <td class="px-3 py-2"><div class="flex items-center">${smHtml}</div></td>
+      </tr>`;
+    }).join('');
+
+    updateMatcherSelCount();
+  }catch(e){
+    console.error('Error loading matcher jobs:', e);
+  }
+}
+
+function updateMatcherSelCount(){
+  const checked = document.querySelectorAll('.matcher-chk:checked').length;
+  $('matcher-sel-count').textContent = `${checked} selected`;
+  $('btn-matcher').disabled = checked === 0;
+}
+
+function matcherSelectAll(){
+  document.querySelectorAll('.matcher-chk').forEach(cb => cb.checked = true);
+  updateMatcherSelCount();
+}
+
+function matcherDeselectAll(){
+  document.querySelectorAll('.matcher-chk').forEach(cb => cb.checked = false);
+  updateMatcherSelCount();
+}
+
+function getSelectedMatcherIds(){
+  return Array.from(document.querySelectorAll('.matcher-chk:checked')).map(cb => parseInt(cb.dataset.idx));
+}
+
+async function matcherLoadCv(){
+  const f = $('matcher-cv-file').files[0];
+  if(!f) return;
+  $('matcher-cv-name').textContent = f.name;
+  $('matcher-cv-name').classList.add('text-zinc-400');
+  $('matcher-cv-name').classList.remove('text-zinc-600');
+  // If there's no pasted text, try to extract text from file for preview
+  if(!$('matcher-cv-text').value.trim()){
+    try{
+      const fd = new FormData();
+      fd.append('file', f);
+      const r = await fetch('/api/parse-matcher-file', {method:'POST', body:fd});
+      const d = await r.json();
+      if(d.text){
+        $('matcher-cv-text').value = d.text;
+        toast(`CV loaded: ${f.name}`, 'success');
+      }else{
+        toast(d.error || 'Could not extract text from CV', 'error');
+      }
+    }catch(e){
+      toast('Error reading CV file', 'error');
+    }
+  }
+}
+
+async function matcherLoadCl(){
+  const f = $('matcher-cl-file').files[0];
+  if(!f) return;
+  $('matcher-cl-name').textContent = f.name;
+  $('matcher-cl-name').classList.add('text-zinc-400');
+  $('matcher-cl-name').classList.remove('text-zinc-600');
+  if(!$('matcher-cl-text').value.trim()){
+    try{
+      const fd = new FormData();
+      fd.append('file', f);
+      const r = await fetch('/api/parse-matcher-file', {method:'POST', body:fd});
+      const d = await r.json();
+      if(d.text){
+        $('matcher-cl-text').value = d.text;
+        toast(`Cover letter loaded: ${f.name}`, 'success');
+      }else{
+        toast(d.error || 'Could not extract text from cover letter', 'error');
+      }
+    }catch(e){
+      toast('Error reading cover letter file', 'error');
+    }
+  }
+}
+
+async function startMatcher(){
+  const ids = getSelectedMatcherIds();
+  if(!ids.length) return toast('Select at least one job','error');
+
+  const cvText = $('matcher-cv-text').value.trim();
+  const clText = $('matcher-cl-text').value.trim();
+  const cvFile = $('matcher-cv-file').files[0];
+  const clFile = $('matcher-cl-file').files[0];
+
+  if(!cvText && !clText && !cvFile && !clFile) return toast('Provide a CV or cover letter','error');
+
+  const btn = $('btn-matcher');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Generating…';
+  $('matcher-prog').classList.remove('hidden');
+  $('matcher-stats').classList.add('hidden');
+  $('matcher-results').classList.add('hidden');
+  $('matcher-prog-bar').style.width = '0%';
+  $('matcher-prog-pct').textContent = '0%';
+
+  try{
+    const fd = new FormData();
+    fd.append('job_ids', JSON.stringify(ids));
+
+    if(cvFile) fd.append('cv_file', cvFile);
+    if(cvText) fd.append('cv_text', cvText);
+    if(clFile) fd.append('cl_file', clFile);
+    if(clText) fd.append('cl_text', clText);
+
+    const lang = $('matcher-lang').value === 'auto' ? $('sel-lang').value : $('matcher-lang').value;
+    fd.append('language', lang);
+    fd.append('model', $('sel-model').value);
+
+    const validSkills = skills.filter(s => s.name.trim());
+    if(validSkills.length) fd.append('skills', JSON.stringify(validSkills));
+
+    const r = await fetch('/api/match-jobs', {method: 'POST', body: fd});
+    const d = await r.json();
+    if(d.error) return toast(d.error, 'error');
+
+    matcherPoll = setInterval(pollMatcher, 1500);
+  }catch(e){
+    toast('Error: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-file-pen text-xs"></i> Generate Applications';
+  }
+}
+
+async function pollMatcher(){
+  try{
+    const r = await fetch('/api/match-status');
+    const d = await r.json();
+
+    const pct = d.total ? Math.round(d.current / d.total * 100) : 0;
+    $('matcher-prog-bar').style.width = pct + '%';
+    $('matcher-prog-pct').textContent = pct + '%';
+    $('matcher-prog-txt').textContent = d.progress;
+
+    if(d.status === 'done' || d.status === 'error'){
+      clearInterval(matcherPoll);
+      $('btn-matcher').disabled = false;
+      $('btn-matcher').innerHTML = '<i class="fa-solid fa-file-pen text-xs"></i> Generate Applications';
+      $('matcher-prog-bar').style.width = '100%';
+
+      if(d.status === 'done'){
+        await loadMatcherResults();
+        $('matcher-stats').classList.remove('hidden');
+        $('matcher-empty').classList.add('hidden');
+      } else {
+        toast(d.progress || 'Matching failed', 'error');
+      }
+      setTimeout(() => $('matcher-prog').classList.add('hidden'), 2000);
+    }
+  }catch(e){
+    clearInterval(matcherPoll);
+  }
+}
+
+async function loadMatcherResults(){
+  try{
+    const r = await fetch('/api/match-results');
+    const d = await r.json();
+    const results = d.results || {};
+
+    const container = $('matcher-results');
+    const keys = Object.keys(results);
+
+    if(!keys.length){
+      container.classList.add('hidden');
+      return;
+    }
+
+    container.classList.remove('hidden');
+    let done = 0, fail = 0;
+
+    container.innerHTML = keys.map(jobId => {
+      const res = results[jobId];
+      if(res.error){ fail++; return ''; }
+      done++;
+
+      const hasCv = !!res.cv_text;
+      const hasCl = !!res.cl_text;
+
+      return `<div class="bg-zinc-800/30 border border-zinc-800/50 rounded-xl p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <div class="font-medium text-zinc-200">${esc(res.title || 'Unknown')}</div>
+            <div class="text-xs text-zinc-500">${esc(res.company || '')}</div>
+          </div>
+          <div class="flex gap-2">
+            <a href="/api/match-download-zip/${jobId}" class="text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1 transition-colors">
+              <i class="fa-solid fa-download text-[10px]"></i> ZIP
+            </a>
+            ${hasCv ? `<a href="/api/match-download/${jobId}/cv" class="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 transition-colors">CV</a>` : ''}
+            ${hasCl ? `<a href="/api/match-download/${jobId}/cl" class="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 transition-colors">CL</a>` : ''}
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          ${hasCv ? `<div class="bg-zinc-900/50 rounded-lg p-3 max-h-[150px] overflow-auto"><div class="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">CV</div><pre class="text-xs text-zinc-400 whitespace-pre-wrap font-body">${esc(res.cv_text.slice(0, 500))}${res.cv_text.length > 500 ? '…' : ''}</pre></div>` : ''}
+          ${hasCl ? `<div class="bg-zinc-900/50 rounded-lg p-3 max-h-[150px] overflow-auto"><div class="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">Cover Letter</div><pre class="text-xs text-zinc-400 whitespace-pre-wrap font-body">${esc(res.cl_text.slice(0, 500))}${res.cl_text.length > 500 ? '…' : ''}</pre></div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+
+    $('m-done').textContent = done;
+    $('m-fail').textContent = fail;
+  }catch(e){
+    console.error('Error loading results:', e);
+  }
+}
+
+function exportMatcherResults(){
+  const selected = getSelectedMatcherIds();
+  if(!selected.length) return toast('No jobs to export', 'error');
+  selected.forEach(id => {
+    window.open(`/api/match-download-zip/${id}`, '_blank');
+  });
+}
+
+/* ── Init ── */
+document.addEventListener('DOMContentLoaded', () => {
+  checkOllama();
+  autoLoadSkills();
+  updateTargetDesc();
+});
 </script>
 </body>
 </html>
