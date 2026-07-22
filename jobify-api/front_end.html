@@ -66,7 +66,7 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 <div class="flex flex-col sm:flex-row gap-3 mb-4">
 <div class="flex-1">
 <label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1 block">Keywords</label>
-<input id="inp-kw" type="text" value="Data Scientist Analyst" placeholder="e.g. Data Scientist, Python Developer…"
+<input id="inp-kw" type="text" value="Data Scientist, Data Analyst" placeholder="e.g. Data Scientist, Python Developer…"
   class="w-full bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/20 transition">
 </div>
 <div class="w-full sm:w-48">
@@ -242,16 +242,22 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 </div>
 
 <div class="flex flex-wrap gap-x-4 gap-y-3 items-end pt-4 mt-4 border-t border-zinc-800/60">
-<div class="min-w-[180px]">
+<div class="min-w-[220px] relative" id="target-dd-wrap">
 <label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 block">Target Type</label>
-<select id="sel-target" onchange="updateTargetDesc()"
-  class="w-full bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-orange-500/50 transition">
-<option value="working_student">Working Student</option>
-<option value="fulltime">Full-time</option>
-<option value="parttime">Part-time</option>
-<option value="internship">Internship</option>
-</select>
-<p id="target-desc" class="text-[11px] text-zinc-600 mt-1 leading-snug"></p>
+<button type="button" id="target-dd-btn" onclick="toggleTargetDropdown()"
+  class="w-full flex items-center justify-between gap-2 bg-zinc-800/80 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500/50 transition text-left">
+<span id="target-dd-label" class="truncate">Select type(s)…</span>
+<i class="fa-solid fa-chevron-down text-[10px] text-zinc-500 transition-transform" id="target-dd-chevron"></i>
+</button>
+<div id="target-dd-panel" class="hidden absolute z-30 mt-1.5 w-80 bg-zinc-900 border border-zinc-700/60 rounded-xl shadow-xl shadow-black/50 p-2">
+<div class="flex gap-2 px-1 pb-1.5 mb-1 border-b border-zinc-800/60">
+<button type="button" onclick="targetSelectAll()" class="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors">Select all</button>
+<span class="text-zinc-700 text-[11px]">·</span>
+<button type="button" onclick="targetDeselectAll()" class="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors">Clear</button>
+</div>
+<div id="target-dd-options"></div>
+</div>
+<div id="target-dd-tags" class="flex flex-wrap gap-1 mt-1.5"></div>
 </div>
 <div>
 <label class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1.5 block">Model</label>
@@ -299,8 +305,8 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 Only matching skills
 </label>
 <label id="jobtype-chk-wrap" class="flex items-center gap-2 text-sm text-zinc-400 pb-1 cursor-pointer select-none">
-<input id="chk-jobtype" type="checkbox" checked onchange="applyFilter()" class="accent-orange-500 w-3.5 h-3.5">
-Only match jobtype
+<input id="chk-jobtype" type="checkbox" checked onchange="applyFilterView(1)" class="accent-orange-500 w-3.5 h-3.5">
+Only show matching type
 </label>
 </div>
 
@@ -310,7 +316,7 @@ Only match jobtype
 <tr class="text-left text-[11px] text-zinc-500 uppercase tracking-wider">
 <th class="px-4 py-2.5 font-medium">Title</th>
 <th class="px-4 py-2.5 font-medium">Company</th>
-<th class="px-4 py-2.5 font-medium w-36">Matching Job Type</th>
+<th class="px-4 py-2.5 font-medium w-48">Job Type(s)</th>
 <th class="px-4 py-2.5 font-medium w-36">Skills Match</th>
 <th class="px-4 py-2.5 font-medium">Location</th>
 <th class="px-4 py-2.5 font-medium w-10"></th>
@@ -474,15 +480,71 @@ let skills = [], scrapePoll = null, clsPoll = null, matcherPoll = null, currentU
 let lastLocVariants = [], lastTermVariants = [];
 let maxVramWorkers = 6; // Updated by onModelChange()
 
-const TYPE_DESC = {
-  working_student:'University enrollment required, 10-20h/week, flex schedule',
-  fulltime:'35-40 hours/week, no student requirement',
-  parttime:'~20 hours/week, no student requirement',
-  internship:'20-40 hours, practical experience, fixed-term placement'
-};
-const TYPE_LABEL = {working_student:'working student',fulltime:'full-time',parttime:'part-time',internship:'internship'};
+const TARGET_TYPES = [
+  {value:'working_student', label:'Working Student', desc:'University enrollment required, 10-20h/week, flex schedule'},
+  {value:'fulltime', label:'Full-time', desc:'35-40 hours/week, no student requirement'},
+  {value:'parttime', label:'Part-time', desc:'~20 hours/week, no student requirement'},
+  {value:'internship', label:'Internship', desc:'20-40 hours, practical experience, fixed-term placement'},
+  {value:'remote', label:'Remote', desc:'Can be performed remotely / from home'},
+];
+const TYPE_LABEL_MAP = Object.fromEntries(TARGET_TYPES.map(t => [t.value, t.label]));
+let lastRunTypes = [];
+let fullClassifiedRows = [];
 
-function updateTargetDesc(){$('target-desc').textContent=TYPE_DESC[$('sel-target').value]||'';}
+function renderTargetTypeOptions(){
+  $('target-dd-options').innerHTML = TARGET_TYPES.map(t => `
+    <label class="flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-800/60 cursor-pointer transition-colors select-none">
+      <input type="checkbox" class="target-type-chk accent-orange-500 w-3.5 h-3.5 mt-0.5" value="${t.value}" ${t.value === 'working_student' ? 'checked' : ''} onchange="updateTargetSelection()">
+      <span class="min-w-0">
+        <span class="block text-sm text-zinc-200">${t.label}</span>
+        <span class="block text-[11px] text-zinc-600 leading-snug">${t.desc}</span>
+      </span>
+    </label>`).join('');
+  updateTargetSelection();
+}
+
+function getSelectedTargetTypes(){
+  return TARGET_TYPES.map(t => t.value).filter(v => {
+    const cb = document.querySelector(`.target-type-chk[value="${v}"]`);
+    return cb && cb.checked;
+  });
+}
+
+function updateTargetSelection(){
+  const selected = getSelectedTargetTypes();
+  const label = $('target-dd-label');
+  if(!selected.length){
+    label.textContent = 'Select type(s)…';
+    label.className = 'truncate text-zinc-500';
+  } else {
+    label.textContent = selected.map(v => TYPE_LABEL_MAP[v]).join(', ');
+    label.className = 'truncate text-zinc-100';
+  }
+  $('target-dd-tags').innerHTML = selected.map(v => `<span class="tag">${TYPE_LABEL_MAP[v]}</span>`).join('');
+  applyFilterView(1);
+}
+
+function toggleTargetDropdown(force){
+  const panel = $('target-dd-panel');
+  const chevron = $('target-dd-chevron');
+  const show = force !== undefined ? force : panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !show);
+  chevron.style.transform = show ? 'rotate(180deg)' : '';
+}
+
+function targetSelectAll(){
+  document.querySelectorAll('.target-type-chk').forEach(cb => cb.checked = true);
+  updateTargetSelection();
+}
+function targetDeselectAll(){
+  document.querySelectorAll('.target-type-chk').forEach(cb => cb.checked = false);
+  updateTargetSelection();
+}
+
+document.addEventListener('click', (e) => {
+  const wrap = $('target-dd-wrap');
+  if(wrap && !wrap.contains(e.target)) toggleTargetDropdown(false);
+});
 
 function toast(msg,type='info'){
   const el=document.createElement('div');
@@ -661,15 +723,9 @@ function exportScraped(){window.open('/api/export/scraped','_blank');}
 /* ── Skills ── */
 const DEFAULT_SKILLS=[
   {name:'Python',level:70,area:'python'},{name:'NumPy',level:75,area:'python'},{name:'Pandas',level:90,area:'python'},
-  {name:'MCP-Server',level:66,area:'python'},{name:'Matplotlib',level:90,area:'python'},{name:'TensorFlow',level:15,area:'python'},
   {name:'PyTorch',level:70,area:'python'},{name:'GLUE',level:80,area:'aws'},{name:'QuickSight',level:100,area:'aws'},
-  {name:'Hadoop/PySpark',level:50,area:'aws'},{name:'Data Optimization',level:75,area:'aws'},{name:'Data Governance',level:83,area:'aws'},
   {name:'PowerShell',level:40,area:'shell'},{name:'API Design',level:40,area:'shell'},
   {name:'MySQL',level:65,area:'sql'},{name:'PostgreSQL',level:83,area:'sql'},{name:'SQLite',level:80,area:'sql'},
-  {name:'LLMs',level:75,area:'ai'},{name:'Computer Vision',level:85,area:'ai'},{name:'Transformers',level:80,area:'ai'},
-  {name:'Linear Models',level:75,area:'ai'},{name:'Data Science',level:85,area:'ai'},{name:'Markdown',level:90,area:'ai'},
-  {name:'Blender',level:90,area:'3d'},{name:'Houdini',level:90,area:'3d'},
-  {name:'Adobe Suite',level:80,area:'adobe'},{name:'MS Office',level:75,area:'office'},{name:'Google Docs',level:80,area:'office'},
   {name:'Statistics',level:77,area:'stats'},{name:'Math',level:50,area:'stats'},
   {name:'English',level:88,area:'language'},{name:'German',level:100,area:'language'},
 ];
@@ -718,14 +774,19 @@ async function autoLoadSkills(){try{const r=await fetch('/api/load-skills'),d=aw
 
 /* ── Classify ── */
 async function startClassify(){
-  const target=$('sel-target').value;const btn=$('btn-classify');
+  // Selected types are no longer a gate — the AI always classifies every job into ALL
+  // categories. If nothing is checked yet, fall back to all types just so the summary
+  // stats below have something to report; it has no effect on which jobs get classified.
+  const types=getSelectedTargetTypes();
+  const typesToSend=types.length?types:TARGET_TYPES.map(t=>t.value);
+  const btn=$('btn-classify');
   btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin text-xs"></i> Classifying…';
   $('cls-prog').classList.remove('hidden');$('cls-stats').classList.add('hidden');
   $('cls-filters').classList.add('hidden');$('cls-tbl-wrap').classList.add('hidden');
   $('cls-pages').classList.add('hidden');$('cls-empty').classList.add('hidden');
   const validSkills=skills.filter(s=>s.name.trim());
   try{
-    await fetch('/api/classify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target_type:target,skills:validSkills.length?validSkills:null,model:$('sel-model').value,max_workers:parseInt($('rng-wrk').value)||6})});
+    await fetch('/api/classify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target_types:typesToSend,skills:validSkills.length?validSkills:null,model:$('sel-model').value,max_workers:parseInt($('rng-wrk').value)||6})});
     clsPoll=setInterval(pollClassify,1200);
   }catch(e){toast('Error: '+e.message,'error');btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-brain text-xs"></i> Classify Jobs';}
 }
@@ -740,7 +801,8 @@ async function pollClassify(){
       $('cls-prog-bar').style.width='100%';
       if(d.status==='done'){
         currentUsedSkills=d.used_skills;
-        $('cls-stats').classList.remove('hidden');$('c-type').textContent=TYPE_LABEL[d.target_type]||d.target_type;
+        lastRunTypes=(d.target_types&&d.target_types.length)?d.target_types:lastRunTypes;
+        $('cls-stats').classList.remove('hidden');$('c-type').textContent=lastRunTypes.map(t=>TYPE_LABEL_MAP[t]||t).join(', ');
         $('c-match').textContent=d.stats.matched;$('c-reject').textContent=d.stats.rejected;$('c-err').textContent=d.stats.error;
         if(!d.used_skills){$('rng-match').disabled=true;$('chk-match').disabled=true;$('chk-match').checked=false;$('match-filter-wrap').style.opacity='0.3';$('match-chk-wrap').style.opacity='0.3';}
         else{$('rng-match').disabled=false;$('chk-match').disabled=false;$('match-filter-wrap').style.opacity='1';$('match-chk-wrap').style.opacity='1';}
@@ -752,42 +814,78 @@ async function pollClassify(){
 }
 
 function renderClsRow(j){
-  const isMatch=j.is_right_jobtype==='yes';
-  const matchBadge=isMatch?'<span class="badge badge-yes"><i class="fa-solid fa-check mr-1 text-[9px]"></i>Match</span>':'<span class="badge badge-no"><i class="fa-solid fa-xmark mr-1 text-[9px]"></i>No</span>';
+  // Always reads the LIVE checkbox state — toggling a type re-filters/re-renders instantly
+  // from the already-fetched dataset (see applyFilterView) without touching the classifier.
+  const activeTypes=getSelectedTargetTypes();
+  const matched=activeTypes.filter(t=>j['is_'+t]==='yes');
+  const noneSelected=activeTypes.length===0;
+  const typeBadges=noneSelected
+    ?'<span class="text-xs text-zinc-700 italic">Check a type above to show it</span>'
+    :(matched.length
+      ?`<div class="flex flex-wrap gap-1">${matched.map(t=>`<span class="badge badge-yes"><i class="fa-solid fa-check mr-1 text-[9px]"></i>${TYPE_LABEL_MAP[t]||t}</span>`).join('')}</div>`
+      :'<span class="badge badge-no"><i class="fa-solid fa-xmark mr-1 text-[9px]"></i>No match</span>');
+  const dim=!noneSelected&&matched.length===0;
   const sm=j.skills_matching;let smHtml;
   if(sm===null||sm===undefined)smHtml='<span class="text-xs text-zinc-700 italic">—</span>';
   else if(typeof sm==='string')smHtml=`<span class="text-xs text-zinc-600 italic">${esc(sm)}</span>`;
   else{const clr=sm>=70?'bg-emerald-500':sm>=40?'bg-amber-500':'bg-red-500';const tc=sm>=70?'text-emerald-400':sm>=40?'text-amber-400':'text-red-400';smHtml=`<div class="match-bar"><div class="match-fill ${clr}" style="width:${sm}%"></div></div><span class="text-xs ${tc}">${sm}%</span>`;}
-  return `<tr class="hover:bg-zinc-800/20 transition-colors ${!isMatch?'opacity-60':''}"><td class="px-4 py-2.5 max-w-[280px]"><div class="truncate font-medium text-zinc-200" title="${escA(j.description||'')}">${esc(j.title||'')}</div></td><td class="px-4 py-2.5 text-zinc-400 max-w-[130px] truncate">${esc(j.company||'')}</td><td class="px-4 py-2.5">${matchBadge}</td><td class="px-4 py-2.5"><div class="flex items-center">${smHtml}</div></td><td class="px-4 py-2.5 text-zinc-500 text-xs whitespace-nowrap">${esc(j.location||'')}</td><td class="px-4 py-2.5 text-center">${j.job_url?`<a href="${escA(j.job_url)}" target="_blank" rel="noopener" class="text-orange-400/70 hover:text-orange-400 transition-colors"><i class="fa-solid fa-arrow-up-right-from-square text-xs"></i></a>`:''}</td></tr>`;
+  return `<tr class="hover:bg-zinc-800/20 transition-colors ${dim?'opacity-60':''}"><td class="px-4 py-2.5 max-w-[280px]"><div class="truncate font-medium text-zinc-200" title="${escA(j.description||'')}">${esc(j.title||'')}</div></td><td class="px-4 py-2.5 text-zinc-400 max-w-[130px] truncate">${esc(j.company||'')}</td><td class="px-4 py-2.5">${typeBadges}</td><td class="px-4 py-2.5"><div class="flex items-center">${smHtml}</div></td><td class="px-4 py-2.5 text-zinc-500 text-xs whitespace-nowrap">${esc(j.location||'')}</td><td class="px-4 py-2.5 text-center">${j.job_url?`<a href="${escA(j.job_url)}" target="_blank" rel="noopener" class="text-orange-400/70 hover:text-orange-400 transition-colors"><i class="fa-solid fa-arrow-up-right-from-square text-xs"></i></a>`:''}</td></tr>`;
 }
 
-async function applyFilter(page){
-  page = page || 1;
+async function loadAllClassifiedRows(){
+  // Pulls the FULL classified set (across all backend pages) for the current skills-match
+  // filter, so that type-checkbox and "only show matching type" toggles can filter/paginate
+  // purely client-side afterwards — instant, no re-fetch, no re-classification.
   const minMatch = parseInt($('rng-match').value) || 0;
   const onlyMatching = $('chk-match').checked;
-  const showRejected = !$('chk-jobtype').checked;
+  let all = [];
+  let page = 1;
   try{
-    const r=await fetch(`/api/classify-data?page=${page}&per_page=${PER}&min_match=${minMatch}&only_matching=${onlyMatching}&show_rejected=${showRejected}`);
-    const d=await r.json();
-    const tb=$('cls-tbody');
-    if(!d.data.length){
-      tb.innerHTML='<tr><td colspan="6" class="px-4 py-10 text-center text-zinc-600">No jobs match the current filters</td></tr>';
-      $('cls-tbl-wrap').classList.remove('hidden');$('cls-pages').classList.add('hidden');
-    }else{
-      tb.innerHTML=d.data.map(renderClsRow).join('');
-      $('cls-tbl-wrap').classList.remove('hidden');
-      pagination('cls-pages',d.page,d.pages,applyFilter);
+    while(true){
+      const r = await fetch(`/api/classify-data?page=${page}&per_page=200&min_match=${minMatch}&only_matching=${onlyMatching}&show_rejected=true`);
+      const d = await r.json();
+      all = all.concat(d.data || []);
+      if(!d.pages || page >= d.pages || page > 50) break;
+      page++;
     }
+  }catch(e){ toast('Error loading classified data','error'); }
+  fullClassifiedRows = all;
+}
+
+function applyFilterView(page){
+  page = page || 1;
+  const activeTypes = getSelectedTargetTypes();
+  const onlyMatchType = $('chk-jobtype').checked;
+  const rows = (onlyMatchType && activeTypes.length)
+    ? fullClassifiedRows.filter(j => activeTypes.some(t => j['is_'+t] === 'yes'))
+    : fullClassifiedRows;
+
+  const tb = $('cls-tbody');
+  if(!rows.length){
+    tb.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-zinc-600">No jobs match the current filters</td></tr>';
+    $('cls-tbl-wrap').classList.remove('hidden');$('cls-pages').classList.add('hidden');
     $('cls-empty').classList.add('hidden');
-  }catch(e){toast('Error loading classified data','error');}
+    return;
+  }
+  const pages = Math.max(1, Math.ceil(rows.length / PER));
+  page = Math.min(Math.max(1, page), pages);
+  const start = (page - 1) * PER;
+  tb.innerHTML = rows.slice(start, start + PER).map(renderClsRow).join('');
+  $('cls-tbl-wrap').classList.remove('hidden');
+  pagination('cls-pages', page, pages, applyFilterView);
+  $('cls-empty').classList.add('hidden');
+}
+
+async function applyFilter(){
+  await loadAllClassifiedRows();
+  applyFilterView(1);
   await loadMatcherJobs();
 }
 
 function exportFinal(){
   const minMatch = parseInt($('rng-match').value) || 0;
   const onlyMatching = $('chk-match').checked;
-  const showRejected = !$('chk-jobtype').checked;
-  window.open(`/api/export/final?min_match=${minMatch}&only_matching=${onlyMatching}&show_rejected=${showRejected}`,'_blank');
+  window.open(`/api/export/final?min_match=${minMatch}&only_matching=${onlyMatching}&show_rejected=false`,'_blank');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -815,7 +913,9 @@ async function loadMatcherJobs(){
   try{
     const minMatch = parseInt($('rng-match')?.value) || 0;
     const onlyMatching = $('chk-match')?.checked ?? true;
-    const showRejected = !($('chk-jobtype')?.checked ?? true);
+    // Application Matcher still only surfaces jobs classified as a right job type match
+    // (this is separate from the Target Type badge display above, which now shows everything).
+    const showRejected = false;
 
     const params = new URLSearchParams({
       min_match: minMatch,
@@ -1087,7 +1187,7 @@ function exportMatcherResults(){
 document.addEventListener('DOMContentLoaded', () => {
   checkOllama();
   autoLoadSkills();
-  updateTargetDesc();
+  renderTargetTypeOptions();
   updateMatcherWorkers();
 });
 </script>

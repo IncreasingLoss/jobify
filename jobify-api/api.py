@@ -3,7 +3,7 @@ Jobify — FastAPI Routes
 """
 
 import io
-import json  # ADD THIS
+import json
 import threading
 from pathlib import Path
 import re
@@ -167,7 +167,6 @@ def scrape_data(page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=2
     if df is None or df.empty:
         return {"data": [], "total": 0, "page": 1, "pages": 0}
         
-    # FIX: Enforce strict column order so frontend Object.values() matches table headers
     strict_order = [
         "title", "company", "location", "date_posted", 
         "site", "job_url", "id", "emails", "description", "company_url", "job_type"
@@ -237,11 +236,10 @@ def classify_status():
             "progress": state["classify_progress"],
             "current": state["classify_current"],
             "total": state["classify_total"],
-            "target_type": state["classify_target_type"],
+            "target_types": state.get("classify_target_types", []),
             "used_skills": state["classify_used_skills"],
             "stats": state["classify_stats"],
         }
-
 
 
 @app.get("/api/classify-data")
@@ -264,13 +262,13 @@ def classify_data(
         
     has_sm = "skills_matching" in filtered.columns
     if has_sm and only_matching:
-        # FIX: Same logic - keep None scores, only filter out low explicit scores
         mask = filtered["skills_matching"].isna() | (filtered["skills_matching"].fillna(-1) >= min_match)
         filtered = filtered[mask]
     
     strict_order = [
-        "title", "company", "skills_matching", "location", "date_posted", 
-        "site", "job_url", "is_right_jobtype"
+        "title", "company", "skills_matching", "job_categories", "location", "date_posted",
+        "site", "job_url", "is_right_jobtype",
+        "is_fulltime", "is_parttime", "is_working_student", "is_internship", "is_remote",
     ]
     existing_cols = [c for c in strict_order if c in filtered.columns]
     other_cols = [c for c in filtered.columns if c not in strict_order]
@@ -320,7 +318,6 @@ def export_final(
         
     has_sm = "skills_matching" in filtered.columns
     if has_sm and only_matching:
-        # FIX: Same logic
         mask = filtered["skills_matching"].isna() | (filtered["skills_matching"].fillna(-1) >= min_match)
         filtered = filtered[mask]
     
@@ -344,7 +341,6 @@ def matcher_jobs(
     only_matching: bool = Query(True),
     show_rejected: bool = Query(False),
 ):
-    """Return filtered classified jobs with row indices for the matcher."""
     with lock:
         df = state.get("classified_df")
     if df is None or df.empty:
@@ -352,14 +348,12 @@ def matcher_jobs(
 
     filtered = df.copy()
     
-    # Filter out rejected jobs unless explicitly shown
     if not show_rejected:
         if "is_right_jobtype" in filtered.columns:
             filtered = filtered[filtered["is_right_jobtype"] == "yes"]
         else:
-            return {"data": [], "total": 0}  # No classification done yet
+            return {"data": [], "total": 0}
     
-    # Apply skills filter
     if "skills_matching" in filtered.columns and only_matching:
         mask = filtered["skills_matching"].isna() | (filtered["skills_matching"].fillna(-1) >= min_match)
         filtered = filtered[mask]
@@ -405,7 +399,6 @@ async def match_jobs(
     if not indices:
         return JSONResponse({"error": "No jobs selected"}, status_code=400)
 
-    # ── Extract CV ──
     cv_extracted = None
     cv_ext = ".txt"
     if cv_file and cv_file.filename:
@@ -420,7 +413,6 @@ async def match_jobs(
     if cv_text and cv_text.strip():
         cv_extracted = cv_text.strip()
 
-    # ── Extract Cover Letter ──
     cl_extracted = None
     cl_ext = ".txt"
     if cl_file and cl_file.filename:
@@ -482,7 +474,6 @@ def match_results():
 
 @app.get("/api/match-download-zip/{job_id}")
 def match_download_zip(job_id: str):
-    """Download CV + Cover Letter as a single ZIP for one job."""
     with lock:
         result = state["match_results"].get(job_id)
     if not result:
@@ -494,7 +485,6 @@ def match_download_zip(job_id: str):
         def _add(text, ext, fname):
             if not text:
                 return
-            # FIX: Cannot recreate PDF from text - convert to docx or txt
             if ext == ".pdf":
                 ext = ".docx"
                 fname = fname.replace(".pdf", ".docx")
@@ -528,7 +518,6 @@ def match_download_zip(job_id: str):
 
 @app.get("/api/match-download/{job_id}/{doc_type}")
 def match_download_single(job_id: str, doc_type: str):
-    """Download a single document (cv or cl) for one job."""
     with lock:
         result = state["match_results"].get(job_id)
     if not result:
@@ -548,7 +537,6 @@ def match_download_single(job_id: str, doc_type: str):
     if not text:
         return JSONResponse({"error": f"No {doc_type} for this job"}, status_code=404)
 
-    # FIX: Cannot recreate PDF from extracted text - convert to docx or txt
     if ext == ".pdf":
         ext = ".docx"
         fname = fname.replace(".pdf", ".docx")
@@ -580,7 +568,6 @@ def match_download_single(job_id: str, doc_type: str):
 
 @app.post("/api/parse-matcher-file")
 async def parse_matcher_file(file: UploadFile = File(...)):
-    """Extract text from an uploaded file for preview in the matcher UI."""
     try:
         content = await file.read()
         text = extract_text_from_file(file.filename, content)

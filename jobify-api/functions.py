@@ -6,23 +6,64 @@ import io
 from pathlib import Path
 import os, json, time, re, logging, threading, subprocess
 import urllib, urllib.request, urllib.error
+import inspect
+import urllib.parse
 import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     from jobspy import scrape_jobs
+    import jobspy.glassdoor as gd_module
 except ImportError:
     print("ERROR: jobspy not installed. Run: pip install jobspy")
     raise SystemExit(1)
 
-# ─── Glassdoor Noise Filter ──────────────────────────────────────────────────
-class _SilenceGlassdoorNoise(logging.Filter):
-    def filter(self, record):
-        msg = record.getMessage()
-        return not ("location not parsed" in msg or "response status code 400" in msg)
+# ─── Glassdoor URL-Encoding Bug Patch ────────────────────────────────────────
+def _patched_get_location(self, location: str, is_remote: bool):
+    """Drop-in replacement for Glassdoor._get_location with URL-encoding fixed."""
+    if not location or is_remote:
+        return "11047", "STATE"  # remote options
+    term = urllib.parse.quote(location)
+    url = f"{self.base_url}/findPopularLocationAjax.htm?maxLocationsToReturn=10&term={term}"
+    res = self.session.get(url)
+    if res.status_code != 200:
+        if res.status_code == 429:
+            err = "429 Response - Blocked by Glassdoor for too many requests"
+        else:
+            err = f"Glassdoor response status code {res.status_code}"
+        gd_module.log.error(err)
+        return None, None
+    items = res.json()
+    if not items:
+        raise ValueError(f"Location '{location}' not found on Glassdoor")
+    location_type = items[0]["locationType"]
+    if location_type == "C":
+        location_type = "CITY"
+    elif location_type == "S":
+        location_type = "STATE"
+    elif location_type == "N":
+        location_type = "COUNTRY"
+    return int(items[0]["locationId"]), location_type
 
-logging.getLogger("JobSpy:Glassdoor").addFilter(_SilenceGlassdoorNoise())
+_patched_get_location._is_jobspy_location_patch = True
+
+def patch_glassdoor_location_bug():
+    """Apply the runtime patch only if the installed version still has the bug."""
+    current = getattr(gd_module.Glassdoor, '_get_location', None)
+    if current and getattr(current, "_is_jobspy_location_patch", False):
+        return
+    try:
+        source = inspect.getsource(current)
+        if "quote(" in source:
+            return
+    except OSError:
+        pass
+    gd_module.Glassdoor._get_location = _patched_get_location
+    print("[Jobify] Patched Glassdoor._get_location (URL-encoding fix applied).")
+
+# Apply patch immediately upon loading the module!
+patch_glassdoor_location_bug()
 
 # ─── Paths ───────────────────────────────────────────────────────────────────
 RESULTS_DIR = os.path.join(os.getcwd(), "results")
@@ -47,7 +88,7 @@ state = {
     "classify_current": 0,
     "classify_total": 0,
     "classify_stats": {"matched": 0, "rejected": 0, "error": 0},
-    "classify_target_type": None,
+    "classify_target_types": [],
     "classify_used_skills": False,
     "classified_df": None,
     "match_status": "idle",
@@ -60,53 +101,55 @@ state = {
 OLLAMA_BASE_URL = "http://localhost:11434"
 
 # ─── Target-Type Prompt Templates ────────────────────────────────────────────
-TYPE_PROMPTS = {
-    "fulltime": (
-        "You verify whether a German job posting is a genuine FULL-TIME position (Vollzeit).\n"
-        "A full-time job means:\n"
-        "- 35-40 hours per week (Vollzeit)\n"
-        "- No requirement for university enrollment\n"
-        "- NOT a working student (Werkstudent), internship (Praktikum), or part-time (Teilzeit) role\n"
-        "- Regular employment, not a student or temporary placement\n\n"
-        'If you are not sure, answer "no".\n\n'
-        'Respond with ONLY this JSON and nothing else:\n'
-        '{"is_right_jobtype":"yes" or "no"}'
-    ),
-    "parttime": (
-        "You verify whether a German job posting is a genuine PART-TIME position (Teilzeit).\n"
-        "A part-time job means:\n"
-        "- Around 20 hours per week (Teilzeit)\n"
-        "- No requirement for university enrollment\n"
-        "- NOT a working student (Werkstudent), internship (Praktikum), or full-time (Vollzeit) role\n\n"
-        'If you are not sure, answer "no".\n\n'
-        'Respond with ONLY this JSON and nothing else:\n'
-        '{"is_right_jobtype":"yes" or "no"}'
-    ),
-    "working_student": (
-        "You verify whether a German job posting is a genuine WORKING STUDENT (Werkstudent) position.\n"
-        "A working student job means:\n"
-        "- Part-time, around 10-20 hours per week\n"
-        "- Requires current university enrollment (eingeschrieben, immatrikuliert, laufendes Studium)\n"
-        "- Flexible schedule compatible with lectures and exams\n"
-        "- Often hourly pay (Werkstudentenvergütung)\n"
-        "- NOT a full-time role, regular part-time without student requirement, or internship (Praktikum)\n\n"
-        'If you are not sure, answer "no".\n\n'
-        'Respond with ONLY this JSON and nothing else:\n'
-        '{"is_right_jobtype":"yes" or "no"}'
-    ),
-    "internship": (
-        "You verify whether a German job posting is a genuine INTERNSHIP (Praktikum).\n"
-        "An internship means:\n"
-        "- 20-40 hours per week\n"
-        "- Fixed-term placement for practical experience\n"
-        "- Listed as Praktikum, Praktikant, Intern, or internship\n"
-        "- May be mandatory (Pflichtpraktikum) or voluntary (Freiwilliges Praktikum)\n"
-        "- NOT a full-time permanent role, working student (Werkstudent), or regular part-time\n\n"
-        'If you are not sure, answer "no".\n\n'
-        'Respond with ONLY this JSON and nothing else:\n'
-        '{"is_right_jobtype":"yes" or "no"}'
-    ),
+# ─── Classification Categories & Prompt ──────────────────────────────────────
+
+CATEGORY_COLUMNS = ["fulltime", "parttime", "working_student", "internship", "remote"]
+
+CATEGORY_LABELS = {
+    "fulltime": "Full-time",
+    "parttime": "Part-time",
+    "working_student": "Working Student",
+    "internship": "Internship",
+    "remote": "Remote",
 }
+
+CLASSIFICATION_PROMPT = (
+    "You are a job classification expert. Analyze the job posting and classify it into ALL applicable categories.\n\n"
+    "For each category, answer \"yes\" or \"no\":\n\n"
+    "- fulltime: Is this a FULL-TIME position (Vollzeit)?\n"
+    "  • 35-40 hours per week\n"
+    "  • No requirement for university enrollment\n"
+    "  • NOT a working student (Werkstudent), internship (Praktikum), or part-time (Teilzeit) role\n"
+    "  • Regular permanent employment\n\n"
+    "- parttime: Is this a PART-TIME position (Teilzeit)?\n"
+    "  • Around 20 hours per week\n"
+    "  • No requirement for university enrollment\n"
+    "  • NOT a working student, internship, or full-time role\n\n"
+    "- working_student: Is this a WORKING STUDENT position (Werkstudent)?\n"
+    "  • Part-time, around 10-20 hours per week\n"
+    "  • Requires current university enrollment (eingeschrieben, immatrikuliert, laufendes Studium)\n"
+    "  • Flexible schedule compatible with lectures and exams\n"
+    "  • Often hourly pay (Werkstudentenvergütung)\n"
+    "  • NOT a full-time role, regular part-time without student requirement, or internship\n\n"
+    "- internship: Is this an INTERNSHIP (Praktikum)?\n"
+    "  • 20-40 hours per week\n"
+    "  • Fixed-term placement for practical experience\n"
+    "  • Listed as Praktikum, Praktikant, Intern, or internship\n"
+    "  • May be mandatory (Pflichtpraktikum) or voluntary (Freiwilliges Praktikum)\n"
+    "  • NOT a full-time permanent role, working student, or regular part-time\n\n"
+    "- remote: Is this job FULLY REMOTE?\n"
+    "  • No on-site presence required at all\n"
+    "  • Listed as \"remote\", \"fully remote\", \"100% remote\", or \"Home-Office\"\n"
+    "  • NOT hybrid (partial on-site) or on-site only\n"
+    "  • The job can be done entirely from anywhere\n\n"
+    "IMPORTANT RULES:\n"
+    "- A job can match multiple categories (e.g., a remote full-time job matches both \"fulltime\" and \"remote\")\n"
+    "- Typically exactly ONE of fulltime/parttime/working_student/internship should be \"yes\" (the main employment type)\n"
+    "- \"remote\" is INDEPENDENT of employment type — it describes the work location, not the contract type\n"
+    "- If you are not sure about a category, answer \"no\"\n\n"
+    'Respond with ONLY this JSON and nothing else:\n'
+    '{"fulltime":"yes" or "no","parttime":"yes" or "no","working_student":"yes" or "no","internship":"yes" or "no","remote":"yes" or "no"}'
+)
 
 SKILLS_APPEND = (
     "\nYou also receive the candidate's skills and background. "
@@ -116,7 +159,7 @@ SKILLS_APPEND = (
     "is missing, not just the matches. Average out how much is missing compared to "
     "what skills match, and the skill level.\n\n"
     'Respond with ONLY this JSON and nothing else:\n'
-    '{"is_right_jobtype":"yes" or "no","skills_matching":integer}'
+    '{"fulltime":"yes" or "no","parttime":"yes" or "no","working_student":"yes" or "no","internship":"yes" or "no","remote":"yes" or "no","skills_matching":integer}'
 )
 
 COMPANY_APPEND = (
@@ -313,13 +356,12 @@ def generate_google_query(keywords, location, model):
 # ─── AI Variant Generation ───────────────────────────────────────────────────
 
 def _parse_variant_list(text):
-    """Parse a list of strings from Ollama output. Handles JSON arrays, comma-separated, newline-separated, pipe-separated, tab-separated, numbered lists."""
+    """Parse a list of strings from Ollama output."""
     if not text:
         return []
     text = text.strip()
     items = []
 
-    # 1) JSON array: [...]
     start = text.find("[")
     end = text.rfind("]") + 1
     if start >= 0 and end > start:
@@ -335,7 +377,6 @@ def _parse_variant_list(text):
         except (json.JSONDecodeError, TypeError):
             pass
 
-    # 2) All delimiters: comma, semicolon, pipe — whichever produces results first
     for delim in [",", ";", "|"]:
         parsed = []
         for part in text.split(delim):
@@ -345,7 +386,6 @@ def _parse_variant_list(text):
         if parsed:
             return parsed
 
-    # 3) Numbered list as last resort
     for line in text.split("\n"):
         line = line.strip()
         if not line or line.isdigit():
@@ -363,7 +403,6 @@ def generate_variants(keywords, location, language, model):
     if not kw_list:
         kw_list = [keywords.strip()]
 
-    # ── Generate location variants (keep as is - working well) ──
     loc_prompt = (
         f"Generate exactly 12 location string variations for job search engines.\n"
         f"Original location: \"{location}\"\n"
@@ -382,7 +421,6 @@ def generate_variants(keywords, location, language, model):
     )
     loc_variants = _parse_variant_list(loc_text) if loc_text else []
 
-    # ── Generate simple translated term variants (NO combinations, NO OR/AND) ──
     keywords_str = ", ".join(kw_list)
     
     term_prompt = (
@@ -408,30 +446,24 @@ def generate_variants(keywords, location, language, model):
         term_prompt, model, timeout=30
     )
     
-    # Parse and aggressively clean
     raw_variants = _parse_variant_list(term_text) if term_text else []
     
     term_variants = []
     seen = set()
     for term in raw_variants:
         term = term.strip()
-        # Skip empty
         if not term:
             continue
-        # Skip any OR/AND combinations
         if re.search(r'\bOR\b|\bAND\b', term, re.IGNORECASE):
             continue
-        # Skip if has prefixes we don't want
         if re.search(r'^(werkstudent|working\s+student|praktikum|intern|hiwi)\s*', term, re.IGNORECASE):
             continue
-        # Deduplicate case-insensitively
         term_lower = term.lower()
         if term_lower in seen:
             continue
         seen.add(term_lower)
         term_variants.append(term)
 
-    # Fallbacks if AI failed
     if not loc_variants:
         loc_variants = _fallback_loc_variants(location)
     if not term_variants:
@@ -590,7 +622,7 @@ def _is_transient(exc):
 
 
 def _resolve_site(site, loc_vars, term_vars, hours_old, country="Germany"):
-    """LinkedIn: first-winner only (fast). Glassdoor/Indeed: all working combos (more results)."""
+    """LinkedIn: first-winner only (fast). Glassdoor/Indeed: all working combos."""
     cancel_event = threading.Event()
     working_pairs = []
 
@@ -599,19 +631,29 @@ def _resolve_site(site, loc_vars, term_vars, hours_old, country="Germany"):
         if cancel_event.is_set():
             return None
         try:
-            df = scrape_jobs(
-                site_name=[site], search_term=term, location=loc,
-                results_wanted=15, hours_old=hours_old,
-                country_indeed=country, linkedin_fetch_description=False,
-                proxies=None, verbose=0,
-            )
+            kwargs = {
+                "site_name": [site], 
+                "search_term": term, 
+                "location": loc,
+                "results_wanted": 15, 
+                "hours_old": hours_old,
+                "linkedin_fetch_description": False,
+                "proxies": None, 
+                "verbose": 0,
+            }
+            
+            if site.lower() == "indeed":
+                kwargs["country_indeed"] = country
+            elif site.lower() == "glassdoor":
+                kwargs["country"] = country.lower()
+                
+            df = scrape_jobs(**kwargs)
             if df is not None and not df.empty:
                 return (loc, term, df)
         except Exception:
             pass
         return None
 
-    # Phase 1: Parallel probe
     is_linkedin = site.lower() == "linkedin"
     
     with ThreadPoolExecutor(max_workers=8) as ex:
@@ -623,7 +665,6 @@ def _resolve_site(site, loc_vars, term_vars, hours_old, country="Germany"):
             result = f.result()
             if result is not None:
                 working_pairs.append(result)
-                # LinkedIn: stop at first winner
                 if is_linkedin:
                     cancel_event.set()
                     break
@@ -631,7 +672,6 @@ def _resolve_site(site, loc_vars, term_vars, hours_old, country="Germany"):
     if not working_pairs:
         return pd.DataFrame(), "no results"
 
-    # Phase 2: Full scrape
     results = []
     
     for loc, term, probe_df in working_pairs:
@@ -639,12 +679,23 @@ def _resolve_site(site, loc_vars, term_vars, hours_old, country="Germany"):
         full_df = pd.DataFrame()
         while True:
             try:
-                full_df = scrape_jobs(
-                    site_name=[site], search_term=term, location=loc,
-                    results_wanted=10000, hours_old=hours_old,
-                    country_indeed=country, linkedin_fetch_description=True,
-                    proxies=None, verbose=0,
-                )
+                kwargs = {
+                    "site_name": [site], 
+                    "search_term": term, 
+                    "location": loc,
+                    "results_wanted": 10000, 
+                    "hours_old": hours_old,
+                    "linkedin_fetch_description": True,
+                    "proxies": None, 
+                    "verbose": 0,
+                }
+                
+                if site.lower() == "indeed":
+                    kwargs["country_indeed"] = country
+                elif site.lower() == "glassdoor":
+                    kwargs["country"] = country.lower()
+                    
+                full_df = scrape_jobs(**kwargs)
             except Exception as e:
                 if _is_transient(e) and attempt < 1:
                     attempt += 1
@@ -656,7 +707,6 @@ def _resolve_site(site, loc_vars, term_vars, hours_old, country="Germany"):
         if full_df is not None and not full_df.empty:
             results.append(full_df)
         elif probe_df is not None and not probe_df.empty:
-            # Full scrape failed but probe worked — keep probe data
             results.append(probe_df)
 
     if results:
@@ -690,7 +740,6 @@ def run_scrape(params):
     hours_old = params.get("hours_old", 240)
     google_query = params.get("google_query", "")
 
-    # Use AI-generated variants if provided, otherwise fallback
     loc_vars = params.get("location_variants") or _fallback_loc_variants(location)
     term_vars = params.get("search_variants") or _fallback_term_variants(keywords)
 
@@ -707,7 +756,6 @@ def run_scrape(params):
         state["scraped_df"] = None
 
     def _scrape_one_site(site):
-        """Run one site in its own thread. Returns a DataFrame."""
         with lock:
             state["scrape_site_status"][site] = "running"
             state["scrape_progress"] = f"Scraping {site}..."
@@ -724,12 +772,10 @@ def run_scrape(params):
                 state["scrape_site_status"][site] = f"error: {e}"
             return pd.DataFrame()
 
-    # Build task list: all sites + optionally google
     tasks = list(sites)
     if google_query:
         tasks.append("google")
 
-    # Run ALL sites in parallel
     site_dfs = []
     with ThreadPoolExecutor(max_workers=len(tasks)) as ex:
         futures = {ex.submit(_scrape_one_site, site): site for site in tasks}
@@ -738,7 +784,6 @@ def run_scrape(params):
             if df is not None and not df.empty:
                 site_dfs.append(df)
 
-    # Combine all results
     if site_dfs:
         jobs = pd.concat(site_dfs, ignore_index=True)
         raw_count = len(jobs)
@@ -776,16 +821,16 @@ def _norm_yes_no(v):
     return "yes" if v in ("yes", "true", "1") else "no"
 
 
-def _classify_one(title, company, job_type, description, skills_text, model, target_type):
+def _classify_one(title, company, job_type, description, skills_text, model):
     desc = (description or "(no description)")[:4000]
-    system_prompt = TYPE_PROMPTS[target_type]
+    system_prompt = CLASSIFICATION_PROMPT
     if skills_text:
         system_prompt += SKILLS_APPEND
-        
+
     needs_company = not company or str(company).strip().lower() in ('', '?', '(?)', 'none', 'nan', 'null')
     if needs_company:
         system_prompt += COMPANY_APPEND
-        
+
     user_prompt = (
         f"Title: {title or '(?)'}\n"
         f"Company: {company or '(?)'}\n"
@@ -796,23 +841,27 @@ def _classify_one(title, company, job_type, description, skills_text, model, tar
         user_prompt = f"Candidate skills:\n{skills_text}\n\nJob posting:\n{user_prompt}"
     r = ollama_chat(system_prompt, user_prompt, model, timeout=90)
     if not r["ok"]:
-        return {"is_right_jobtype": None, "skills_matching": None, "extracted_company": None}
+        result = {f"is_{cat}": None for cat in CATEGORY_COLUMNS}
+        result["skills_matching"] = None
+        result["extracted_company"] = None
+        return result
     d = r["data"]
     sm = d.get("skills_matching")
     try:
         sm = max(0, min(100, int(float(sm)))) if sm is not None else None
     except (TypeError, ValueError):
         sm = None
-        
+
     extracted_company = None
     if needs_company:
         extracted_company = d.get("company_name")
-        
-    return {
-        "is_right_jobtype": _norm_yes_no(d.get("is_right_jobtype")),
-        "skills_matching": sm,
-        "extracted_company": extracted_company,
-    }
+
+    result = {}
+    for cat in CATEGORY_COLUMNS:
+        result[f"is_{cat}"] = _norm_yes_no(d.get(cat))
+    result["skills_matching"] = sm
+    result["extracted_company"] = extracted_company
+    return result
 
 
 def _fmt_skills(skills_list):
@@ -830,30 +879,41 @@ def run_classify(params):
             state["classify_status"] = "error"
             state["classify_progress"] = "No scraped data to classify."
         return
-    target_type = params.get("target_type", "working_student")
-    if target_type not in TYPE_PROMPTS:
+
+    target_types = params.get("target_types", [])
+    if not target_types and params.get("target_type"):
+        target_types = [params["target_type"]]
+    if not target_types:
+        target_types = ["working_student"]
+
+    valid_types = [t for t in target_types if t in CATEGORY_COLUMNS]
+    if not valid_types:
         with lock:
             state["classify_status"] = "error"
-            state["classify_progress"] = f"Unknown target type: {target_type}"
+            state["classify_progress"] = f"No valid target types: {target_types}"
         return
+
     skills_json = params.get("skills")
     model = params.get("model", "qwen3:8b")
     max_workers = params.get("max_workers", 6)
     skills_text = _fmt_skills(skills_json) if skills_json else None
     used_skills = skills_text is not None
     total = len(df)
+
     title_col = next((c for c in ["title", "job_title"] if c in df.columns), None)
     desc_col = next((c for c in ["description", "job_description"] if c in df.columns), None)
     comp_col = next((c for c in ["company", "company_name"] if c in df.columns), None)
     jt_col = next((c for c in ["job_type"] if c in df.columns), None)
+
     with lock:
         state["classify_status"] = "running"
         state["classify_current"] = 0
         state["classify_total"] = total
         state["classify_progress"] = f"Classifying 0/{total}..."
         state["classify_stats"] = {"matched": 0, "rejected": 0, "error": 0}
-        state["classify_target_type"] = target_type
+        state["classify_target_types"] = valid_types
         state["classify_used_skills"] = used_skills
+
     results_map = {}
 
     def _do(idx, row):
@@ -862,7 +922,7 @@ def run_classify(params):
         jt = str(row.get(jt_col, "")) if jt_col else ""
         d = (str(row.get(desc_col, ""))[:1500]
              if desc_col and pd.notna(row.get(desc_col)) else "")
-        r = _classify_one(t, c, jt, d, skills_text, model, target_type)
+        r = _classify_one(t, c, jt, d, skills_text, model)
         return idx, r
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -875,22 +935,46 @@ def run_classify(params):
             with lock:
                 state["classify_current"] = done_count
                 state["classify_progress"] = f"Classifying {done_count}/{total}..."
+
     results = [results_map[i] for i in df.index]
-    df["is_right_jobtype"] = [r["is_right_jobtype"] for r in results]
+
+    for cat in CATEGORY_COLUMNS:
+        df[f"is_{cat}"] = [r[f"is_{cat}"] for r in results]
+
     if used_skills:
         df["skills_matching"] = [r["skills_matching"] for r in results]
-    # Apply AI-extracted company names if original was empty
+
+    def _build_label(r):
+        labels = []
+        for cat in CATEGORY_COLUMNS:
+            if r[f"is_{cat}"] == "yes":
+                labels.append(CATEGORY_LABELS[cat])
+        return ", ".join(labels) if labels else "Unclassified"
+
+    df["job_categories"] = [_build_label(r) for r in results]
+
+    def _matches_any(r):
+        for tt in valid_types:
+            if r[f"is_{tt}"] == "yes":
+                return "yes"
+        return "no"
+
+    df["is_right_jobtype"] = [_matches_any(r) for r in results]
+
     for idx, r in zip(df.index, results):
         if r.get("extracted_company"):
             df.at[idx, "company"] = r["extracted_company"]
+
     n_yes = (df["is_right_jobtype"] == "yes").sum()
     n_no = (df["is_right_jobtype"] == "no").sum()
     n_err = df["is_right_jobtype"].isna().sum()
+
     df.to_csv(os.path.join(RESULTS_DIR, "jobs_classified.csv"), index=False)
     final_df = df[df["is_right_jobtype"] == "yes"].copy()
     if used_skills and "skills_matching" in final_df.columns and not final_df.empty:
-        final_df = final_df.sort_values("skills_matching", ascending=False)
+        final_df = final_df.sort_values("skills_matching", ascending=False, na_position="last")
     final_df.to_csv(os.path.join(RESULTS_DIR, "jobs_final.csv"), index=False)
+
     with lock:
         state["classified_df"] = df
         state["classify_status"] = "done"
@@ -902,10 +986,6 @@ def run_classify(params):
 # ─── File Text Extraction ────────────────────────────────────────────────────
 
 def extract_text_from_file(filename, content_bytes):
-    """Extract plain text from common office file types.
-    Returns the text string or None if extraction fails.
-    Supported: .txt .docx .pdf .pptx .odt .rtf
-    """
     ext = Path(filename).suffix.lower()
     try:
         if ext == ".txt":
@@ -915,7 +995,6 @@ def extract_text_from_file(filename, content_bytes):
             from docx import Document
             doc = Document(io.BytesIO(content_bytes))
             paras = [p.text for p in doc.paragraphs if p.text.strip()]
-            # Also grab text from tables
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
@@ -973,7 +1052,6 @@ def extract_text_from_file(filename, content_bytes):
 
         elif ext == ".rtf":
             raw = content_bytes.decode("utf-8", errors="replace")
-            # Strip RTF control words
             cleaned = re.sub(r"\\[a-z]+\d*[\s]?", "", raw)
             cleaned = re.sub(r"[{}]", "", cleaned)
             cleaned = re.sub(r"\s+", " ", cleaned).strip()
@@ -989,13 +1067,6 @@ def extract_text_from_file(filename, content_bytes):
 def _rewrite_document(doc_type, original_text, has_original,
                       job_title, job_company, job_description,
                       skills_text, language, model):
-    """Call Ollama to rewrite a CV or cover letter for a specific job.
-    doc_type: 'cv' or 'cl'
-    has_original: True  → small edits to existing text
-                    False → generate from scratch using skills profile only
-    Returns the rewritten text string, or None on failure.
-    """
-
     desc_block = f"Description:\n{job_description[:6000]}"
     skills_block = skills_text if skills_text else "(No skills profile provided)"
 
@@ -1044,7 +1115,6 @@ def _rewrite_document(doc_type, original_text, has_original,
                 f"letter text only — no explanations, no markdown, no code fences."
             )
     else:
-        # ── Generate from scratch ──
         if doc_type == "cv":
             sys_prompt = (
                 "You are a professional CV writer. Create a CV based ONLY on the candidate's "
@@ -1088,8 +1158,6 @@ def _rewrite_document(doc_type, original_text, has_original,
 
 def run_match_jobs(job_indices, cv_text, cl_text, cv_ext, cl_ext,
                    skills_list, language, model):
-    """Process selected jobs: rewrite CV + cover letter for each one."""
-
     with lock:
         classified_df = state["classified_df"]
         scraped_df = state["scraped_df"]
@@ -1131,7 +1199,6 @@ def run_match_jobs(job_indices, cv_text, cl_text, cv_ext, cl_ext,
         title = str(row.get("title", "Unknown"))
         company = str(row.get("company", "Unknown"))
 
-        # Full description from scraped_df if available
         description = ""
         if scraped_df is not None and not scraped_df.empty and idx < len(scraped_df):
             dv = scraped_df.iloc[idx].get("description")
