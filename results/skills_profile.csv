@@ -1,0 +1,40 @@
+name,level,area
+python,70,python
+numpy,71,python
+pandas,94,python
+mcp-server,66,python
+matplotlib,90,python
+tensorflow,12,python
+pytorch,70,python
+glue,80,aws
+quick,100,aws
+hadoop/pyspark,50,aws
+dataoptimization,75,aws
+datagovernance,83,aws
+powershell,40,shell
+api,54,shell
+mysql,65,sql
+postgres-sql,88,sql
+sql-light,85,sql
+LLMs,75,ai
+Computer - Vision,85,ai
+Transformer,82,ai
+linearModels,75,ai
+Datascience,85,ai
+Markdown,79,ai
+Blender,100,3d
+Houdini,90,3d
+AdobeSuite,73,Adobe
+MSOffice,100,Office
+GoogleDocs,100,Office
+C,26,C
+C++,14,C
+R,22,R
+Sales,43,Sales
+IT(Administration),58,IT(Administration)
+electrical engineering,23,electrical engineering
+math,50,math
+statistics,77,statistics
+C2,88,English
+C2,100,German
+Agentic AI,79,ai

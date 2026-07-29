@@ -21,30 +21,51 @@ except ImportError:
 
 # ─── Glassdoor URL-Encoding Bug Patch ────────────────────────────────────────
 def _patched_get_location(self, location: str, is_remote: bool):
-    """Drop-in replacement for Glassdoor._get_location with URL-encoding fixed."""
+    """Drop-in replacement for Glassdoor._get_location with URL-encoding fixed.
+    Also handles long AI-generated location strings by falling back to the first part."""
     if not location or is_remote:
         return "11047", "STATE"  # remote options
-    term = urllib.parse.quote(location)
-    url = f"{self.base_url}/findPopularLocationAjax.htm?maxLocationsToReturn=10&term={term}"
-    res = self.session.get(url)
-    if res.status_code != 200:
+
+    # Glassdoor's AJAX endpoint often fails with long strings like "Munich, Bavaria, Germany".
+    # We try the full string first, but fall back to just the first part (usually the city).
+    terms_to_try = [location]
+    if "," in location:
+        terms_to_try.append(location.split(",")[0].strip())
+
+    for term in terms_to_try:
+        encoded_term = urllib.parse.quote(term)
+        url = f"{self.base_url}/findPopularLocationAjax.htm?maxLocationsToReturn=10&term={encoded_term}"
+        try:
+            res = self.session.get(url, headers=getattr(self, 'headers', None) or {})
+        except Exception as e:
+            continue
+
         if res.status_code == 429:
-            err = "429 Response - Blocked by Glassdoor for too many requests"
-        else:
-            err = f"Glassdoor response status code {res.status_code}"
-        gd_module.log.error(err)
-        return None, None
-    items = res.json()
-    if not items:
-        raise ValueError(f"Location '{location}' not found on Glassdoor")
-    location_type = items[0]["locationType"]
-    if location_type == "C":
-        location_type = "CITY"
-    elif location_type == "S":
-        location_type = "STATE"
-    elif location_type == "N":
-        location_type = "COUNTRY"
-    return int(items[0]["locationId"]), location_type
+            print("[GD-LOC-ERROR] 429 Response - Blocked by Glassdoor for too many requests")
+            return None, None
+        if res.status_code != 200:
+            continue  # Silently try the next term variation
+
+        try:
+            items = res.json()
+        except ValueError:
+            continue
+
+        if not items:
+            continue  # Try the next shorter term
+
+        location_type = items[0].get("locationType", "C")
+        if location_type == "C":
+            location_type = "CITY"
+        elif location_type == "S":
+            location_type = "STATE"
+        elif location_type == "N":
+            location_type = "COUNTRY"
+        
+        return int(items[0]["locationId"]), location_type
+
+    print(f"[GD-LOC-WARN] Location '{location}' not found on Glassdoor")
+    return None, None
 
 _patched_get_location._is_jobspy_location_patch = True
 
@@ -64,6 +85,93 @@ def patch_glassdoor_location_bug():
 
 # Apply patch immediately upon loading the module!
 patch_glassdoor_location_bug()
+
+# ─── Glassdoor CSRF-Token Bug Patch ──────────────────────────────────────────
+def _patched_get_csrf_token(self):
+    """Drop-in replacement for Glassdoor._get_csrf_token using a live bootstrap URL.
+    Tries multiple URLs and adds headers to bypass Cloudflare 403s."""
+    
+    urls_to_try = [
+        f"{self.base_url}/Job/index.htm",
+        f"{self.base_url}/index.htm",
+        f"{self.base_url}/Job/jobs.htm",
+    ]
+    
+    # Ensure we send browser-like headers to avoid Cloudflare blocks
+    headers = getattr(self, 'headers', None) or {}
+    if 'Accept' not in headers:
+        headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+    if 'Accept-Language' not in headers:
+        headers['Accept-Language'] = 'en-US,en;q=0.5'
+    if 'Referer' not in headers:
+        headers['Referer'] = self.base_url
+
+    for url in urls_to_try:
+        try:
+            res = self.session.get(url, headers=headers)
+            if res.status_code != 200:
+                continue
+                
+            # Try several known patterns for Glassdoor CSRF tokens
+            patterns = [
+                r'"token":\s*"([^"]+)"',
+                r'"csrfToken":\s*"([^"]+)"',
+                r'"gdToken":\s*"([^"]+)"',
+                r'name=["\']csrfToken["\']\s+value=["\']([^"\']+)["\']',
+            ]
+            for pattern in patterns:
+                matches = re.findall(pattern, res.text)
+                if matches:
+                    return matches[0]
+                    
+            # Fallback: look inside Next.js __NEXT_DATA__ JSON blob
+            next_data_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', res.text)
+            if next_data_match:
+                try:
+                    data = json.loads(next_data_match.group(1))
+                    def find_token(obj):
+                        if isinstance(obj, dict):
+                            for k, v in obj.items():
+                                if k.lower() in ('token', 'csrftoken', 'gdtoken') and isinstance(v, str):
+                                    return v
+                                found = find_token(v)
+                                if found: return found
+                        elif isinstance(obj, list):
+                            for item in obj:
+                                found = find_token(item)
+                                if found: return found
+                        return None
+                    token = find_token(data)
+                    if token:
+                        return token
+                except Exception:
+                    pass
+        except Exception:
+            continue
+
+    print(f"[GD-CSRF-WARN] Failed to fetch CSRF token (likely Cloudflare block or IP ban).")
+    return None
+
+_patched_get_csrf_token._is_jobspy_csrf_patch = True
+
+def patch_glassdoor_csrf_bug():
+    """Apply the runtime patch only if the installed version still uses the dead
+    bootstrap URL. Safe to call multiple times."""
+    current = getattr(gd_module.Glassdoor, '_get_csrf_token', None)
+    if current and getattr(current, "_is_jobspy_csrf_patch", False):
+        return False
+    try:
+        source = inspect.getsource(current)
+        if "Job/index.htm" in source:
+            print("JobSpy already fixed upstream — no CSRF patch needed.")
+            return False
+    except OSError:
+        pass
+    gd_module.Glassdoor._get_csrf_token = _patched_get_csrf_token
+    print("[Jobify] Patched Glassdoor._get_csrf_token (Next.js bootstrap-URL fix applied).")
+    return True
+
+patch_glassdoor_csrf_bug()
 
 # ─── Paths ───────────────────────────────────────────────────────────────────
 RESULTS_DIR = os.path.join(os.getcwd(), "results")
@@ -623,13 +731,10 @@ def _is_transient(exc):
 
 def _resolve_site(site, loc_vars, term_vars, hours_old, country="Germany"):
     """LinkedIn: first-winner only (fast). Glassdoor/Indeed: all working combos."""
-    cancel_event = threading.Event()
     working_pairs = []
 
     def _probe(loc, term):
         """Fast probe: no description, small request. Returns (loc, term, df) or None."""
-        if cancel_event.is_set():
-            return None
         try:
             kwargs = {
                 "site_name": [site], 
@@ -650,30 +755,42 @@ def _resolve_site(site, loc_vars, term_vars, hours_old, country="Germany"):
             df = scrape_jobs(**kwargs)
             if df is not None and not df.empty:
                 return (loc, term, df)
-        except Exception:
-            pass
+            print(f"[PROBE-EMPTY] site={site} loc={loc!r} term={term!r}")
+        except Exception as e:
+            print(f"[PROBE-ERROR] site={site} loc={loc!r} term={term!r} -> {type(e).__name__}: {e}")
         return None
 
     is_linkedin = site.lower() == "linkedin"
+    is_glassdoor = site.lower() == "glassdoor"
     
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        futures = {
-            ex.submit(_probe, loc, term): (loc, term)
-            for loc in loc_vars for term in term_vars
-        }
-        for f in as_completed(futures):
-            result = f.result()
-            if result is not None:
-                working_pairs.append(result)
-                if is_linkedin:
-                    cancel_event.set()
-                    break
+    if is_glassdoor:
+        # Process Glassdoor entirely sequentially with a small delay to avoid Cloudflare 403/400 bans
+        print("[Jobify] Scraping Glassdoor sequentially to bypass Cloudflare...")
+        for loc in loc_vars:
+            for term in term_vars:
+                result = _probe(loc, term)
+                if result is not None:
+                    working_pairs.append(result)
+                time.sleep(1)  # Be polite to Glassdoor to avoid WAF blocks
+    else:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            futures = {
+                ex.submit(_probe, loc, term): (loc, term)
+                for loc in loc_vars for term in term_vars
+            }
+            for f in as_completed(futures):
+                result = f.result()
+                if result is not None:
+                    working_pairs.append(result)
+                    if is_linkedin:
+                        break
 
     if not working_pairs:
         return pd.DataFrame(), "no results"
 
     results = []
     
+    # Also process the full scrape sequentially for Glassdoor to avoid bursts
     for loc, term, probe_df in working_pairs:
         attempt = 0
         full_df = pd.DataFrame()
@@ -708,6 +825,9 @@ def _resolve_site(site, loc_vars, term_vars, hours_old, country="Germany"):
             results.append(full_df)
         elif probe_df is not None and not probe_df.empty:
             results.append(probe_df)
+            
+        if is_glassdoor:
+            time.sleep(1) # Delay between full scrapes too
 
     if results:
         combined = pd.concat(results, ignore_index=True)

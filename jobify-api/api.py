@@ -599,7 +599,6 @@ def _ser(df_slice):
     return data
 
 
-
 if __name__ == "__main__":
     print("Starting Jobify UI on http://localhost:8000")
     threading.Thread(target=check_ollama, daemon=True).start()

@@ -1,18 +1,17 @@
 # Byte-compiled / optimized / DLL files
-__pycache__/
+*__pycache__/
 *.py[cod]
 *$py.class
-.playwright-mcp/**
+*.playwright-mcp/**
 
 # Environments
-.venv/**
-venv/**
+*.venv/**
+*venv/**
 # IDEs and Editors
-.vscode/
-.idea/
+*.vscode/**
+*.idea/**
 
 # Data files (optional, but often good to ignore large datasets)
-*.csv
 *.json
 *.sqlite3
 
@@ -20,4 +19,5 @@ venv/**
 *runtimes2.txt
 
 #Outputs
-results/**
+*results/**
+!results/skills_profile.csv
