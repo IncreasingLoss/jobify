@@ -57,7 +57,30 @@ if not defined PYTHON_EXE (
 echo Found Python 3.12 as %PYTHON_EXE%.
 
 echo.
-echo 3) Creating virtual environment and installing dependencies...
+echo 3) Checking Ollama and pulling model qwen3:8b...
+where ollama >nul 2>&1
+if errorlevel 1 (
+    echo Ollama is not installed. Attempting installation with winget...
+    where winget >nul 2>&1
+    if errorlevel 1 (
+        echo ERROR: winget is not available.
+        echo Please install Ollama manually from https://ollama.com and re-run this setup.
+        pause
+        exit /b 1
+    )
+    set "ERROR_CMD=winget install --id Ollama.Ollama -e --source winget"
+    winget install --id Ollama.Ollama -e --source winget
+    call :check_exit "Ollama installation failed. Please install Ollama manually and re-run this setup."
+) else (
+    echo Ollama is already installed.
+)
+
+set "ERROR_CMD=ollama pull qwen3:8b"
+ollama pull qwen3:8b
+call :check_exit "Failed to pull Ollama model qwen3:8b. Please check your network and try again."
+
+echo.
+echo 4) Creating virtual environment and installing dependencies...
 if not exist .venv (
     set "ERROR_CMD=%PYTHON_EXE% -m venv .venv"
     %PYTHON_EXE% -m venv .venv
@@ -79,17 +102,22 @@ python -m pip install -r requirements.txt
 call :check_exit "Failed to install dependencies from requirements.txt. Please inspect output above."
 
 echo.
-echo 4) Executing setup notebook...
+echo 5) Executing setup notebook...
 set "ERROR_CMD=python -m nbconvert --to notebook --execute \"jobify\0_setup_jobspy.ipynb\" --ExecutePreprocessor.timeout=600"
+python -m pip install nbconvert
+call :check_exit "Failed to install nbconvert."
 python -m nbconvert --to notebook --execute "jobify\0_setup_jobspy.ipynb" --ExecutePreprocessor.timeout=600
 call :check_exit "Notebook execution failed. Please inspect the notebook output above."
 
 echo.
-echo 5) Starting API and opening browser...
+echo 6) Starting Ollama service and the API...
+set "ERROR_CMD=start Ollama"
+start "Ollama" cmd /k "ollama serve --host 0.0.0.0 --port 11434"
+
 set "ERROR_CMD=start API"
 start "Jobify API" cmd /k "cd /d "%~dp0jobify-api" && "%~dp0.venv\Scripts\python" -m uvicorn api:app --host 127.0.0.1 --port 8000"
 
-timeout /t 5 /nobreak >nul
+timeout /t 8 /nobreak >nul
 start "" "http://127.0.0.1:8000"
 
 echo Setup complete.

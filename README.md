@@ -13,17 +13,20 @@ The script will:
 - pull the latest repository changes from Git
 - check for Python 3.12
 - install Python 3.12 using `winget` if needed
+- install Ollama if needed
+- pull the Ollama model `qwen3:8b`
 - create a virtual environment in `.venv`
 - install dependencies from `requirements.txt`
 - execute `jobify\0_setup_jobspy.ipynb`
+- start the Ollama server on `http://0.0.0.0:11434`
 - start the API and open `http://127.0.0.1:8000`
 
 ## Requirements
 
 - Git must be installed and available on `PATH`
-- Internet access to download Python and Python packages
+- Internet access to download Python, Ollama, and Python packages
 - write permission inside this repository folder
-- `winget` is required only for auto-installing Python 3.12
+- `winget` is required for auto-installing Python 3.12 and Ollama
 
 ## If automatic Python installation fails
 
