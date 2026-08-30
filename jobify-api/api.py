@@ -327,8 +327,13 @@ def export_final(
     if not used_skills and has_sm:
         filtered = filtered.copy()
         filtered["skills_matching"] = filtered["skills_matching"].fillna("No skills — couldn't match")
+
+    export_cols = ["site", "job_url", "title", "company", "location", "skills_matching"]
+    existing_export_cols = [c for c in export_cols if c in filtered.columns]
+    filtered = filtered[existing_export_cols]
+
     buf = io.StringIO()
-    filtered.to_csv(buf, index=False)
+    filtered.to_csv(buf, index=False, sep=";")
     return Response(buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=jobs_final.csv"})
 

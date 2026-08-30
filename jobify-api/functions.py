@@ -1093,7 +1093,11 @@ def run_classify(params):
     final_df = df[df["is_right_jobtype"] == "yes"].copy()
     if used_skills and "skills_matching" in final_df.columns and not final_df.empty:
         final_df = final_df.sort_values("skills_matching", ascending=False, na_position="last")
-    final_df.to_csv(os.path.join(RESULTS_DIR, "jobs_final.csv"), index=False)
+    export_cols = ["site", "job_url", "title", "company", "location", "skills_matching"]
+    existing_export_cols = [c for c in export_cols if c in final_df.columns]
+    final_df[existing_export_cols].to_csv(
+        os.path.join(RESULTS_DIR, "jobs_final.csv"), index=False, sep=";"
+    )
 
     with lock:
         state["classified_df"] = df
